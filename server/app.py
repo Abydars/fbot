@@ -221,8 +221,12 @@ def create_app(state: SharedState) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"No data for {symbol} {tf}")
         # Return as list of {time, open, high, low, close, volume}
         df = df.reset_index()
-        df["time"] = df["time"].astype("int64") // 10**9   # Unix seconds
-        return JSONResponse(df[["time","open","high","low","close","volume"]].to_dict("records"))
+        # Use .timestamp() — the only reliable way with tz-aware DatetimeTZDtype.
+        # .astype("int64") returns nanoseconds but silently gives wrong results
+        # for tz-aware columns, producing timestamps near Unix epoch (Jan 1970).
+        df["time"] = df["time"].apply(lambda x: int(x.timestamp()))
+        records = df[["time","open","high","low","close","volume"]].to_dict("records")
+        return JSONResponse(records)
 
     @app.post("/api/close/{ticket}")
     async def api_close(ticket: int):

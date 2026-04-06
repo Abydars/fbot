@@ -313,30 +313,16 @@ function initChart() {
     layout: { background:{color:'#0b0b0f'}, textColor:'#787b86' },
     grid:   { vertLines:{color:'#1f1f2e'}, horzLines:{color:'#1f1f2e'} },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor:'#1f1f2e', scaleMargins:{ top:0.05, bottom:0.15 } },
+    rightPriceScale: { borderColor:'#1f1f2e' },
     timeScale: { borderColor:'#1f1f2e', timeVisible:true, secondsVisible:false },
   });
 
-  // Candlestick series on the default right price scale
+  // Candlestick series
   candleSeries = lwChart.addCandlestickSeries({
     upColor:'#26a69a', downColor:'#ef5350',
     borderUpColor:'#26a69a', borderDownColor:'#ef5350',
     wickUpColor:'#26a69a',   wickDownColor:'#ef5350',
   });
-
-  // Volume — use the LEFT scale as a contained overlay so it cannot
-  // interfere with the main (right) price scale.
-  const volSeries = lwChart.addHistogramSeries({
-    priceFormat:       { type:'volume' },
-    priceScaleId:      'left',
-    lastValueVisible:  false,
-    priceLineVisible:  false,
-  });
-  lwChart.priceScale('left').applyOptions({
-    visible:      false,                          // hide the left axis label
-    scaleMargins: { top: 0.85, bottom: 0 },      // occupy only bottom 15%
-  });
-  lwChart._volSeries = volSeries;
 
   // Keep chart sized to container
   const ro = new ResizeObserver(() => {
@@ -360,9 +346,7 @@ async function loadChart(symbol, tf) {
     if (!res.ok) return;
     const data = await res.json();
     const candles = data.map(d=>({ time:d.time, open:d.open, high:d.high, low:d.low, close:d.close }));
-    const vols    = data.map(d=>({ time:d.time, value:d.volume, color: d.close>=d.open?'#26a69a44':'#ef535044' }));
     candleSeries.setData(candles);
-    lwChart._volSeries.setData(vols);
     lwChart.timeScale().fitContent();
     document.getElementById('chart-sym').textContent = symbol;
 
