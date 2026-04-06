@@ -111,7 +111,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .pos-card{border-bottom:1px solid var(--border);padding:8px 10px 6px;transition:background .1s}
 .pos-card:hover{background:var(--bg2)}
 .pos-card-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
-.pos-sym{font-size:11px;font-weight:700;color:#fff}
+.pos-sym{font-size:11px;font-weight:700;color:#fff;cursor:pointer;text-decoration:underline dotted rgba(255,255,255,.3)}.pos-sym:hover{color:var(--accent)}
 .pos-sym em{color:var(--text3);font-style:normal;font-weight:400;font-size:10px}
 .dir-badge{padding:1px 5px;border-radius:2px;font-size:9px;font-weight:700;letter-spacing:.3px}
 .dir-badge.long{background:#0d2e2a;color:var(--green);border:1px solid var(--green2)}
@@ -525,7 +525,7 @@ function renderPositions(positions) {
       // Full render only on first appearance
       card.innerHTML = `
         <div class="pos-card-head">
-          <span class="pos-sym">${p.symbol}</span>
+          <span class="pos-sym" onclick="selectSymbol('${p.symbol}')">${p.symbol}</span>
           <span class="dir-badge ${dirCls}">${p.direction}</span>
           <span class="strat-badge">${p.signal_type||'MANUAL'}</span>
           <div class="pos-pnl">
