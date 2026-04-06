@@ -111,6 +111,18 @@ class MT5Client:
         logger.success(
             f"  Type    : {'DEMO' if account_info.trade_mode == 0 else 'LIVE'}"
         )
+        # Check AutoTrading is enabled
+        terminal_info = await asyncio.to_thread(mt5.terminal_info)
+        if terminal_info and not terminal_info.trade_allowed:
+            logger.warning(
+                "AutoTrading is DISABLED in MT5 terminal! "
+                "Click the AutoTrading button (toolbar) or enable via "
+                "Tools → Options → Expert Advisors → Allow automated trading. "
+                "The bot will run but cannot place orders until it is enabled."
+            )
+        elif terminal_info and terminal_info.trade_allowed:
+            logger.success("  AutoTrading : ENABLED")
+
         logger.success("=" * 60)
 
         # Validate mode matches config
@@ -497,7 +509,16 @@ class MT5Client:
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             code = result.retcode if result else "None"
             comment_txt = result.comment if result else ""
-            logger.error(f"place_order failed for {symbol}: retcode={code} {comment_txt}")
+            hint = ""
+            if code == 10027:
+                hint = " → Enable AutoTrading in MT5 toolbar"
+            elif code == 10018:
+                hint = " → Market is closed"
+            elif code == 10019:
+                hint = " → Insufficient funds"
+            elif code == 10016:
+                hint = " → Invalid SL/TP"
+            logger.error(f"place_order failed for {symbol}: retcode={code} {comment_txt}{hint}")
             return None
 
         logger.success(
