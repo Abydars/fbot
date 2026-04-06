@@ -595,7 +595,7 @@ class MT5Client:
             mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY
             else mt5.ORDER_TYPE_BUY
         )
-        tick = await self.get_tick(pos.symbol)
+        tick = await self.get_tick(self._strip_suffix(pos.symbol))
         if tick is None:
             return False
 
