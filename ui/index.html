@@ -141,6 +141,28 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .ticker{flex:1;overflow:hidden;padding-left:12px;color:var(--text2);font-size:9px;white-space:nowrap;text-overflow:ellipsis}
 .ticker b{color:var(--orange)}
 .val.p{color:var(--green)}.val.n{color:var(--red)}
+
+/* ─── Config Modal ───────────────────────────────────────────── */
+.cfg-tab{padding:8px 16px;background:transparent;border:none;color:var(--text2);font-family:var(--font);font-size:10px;font-weight:600;letter-spacing:.5px;cursor:pointer;border-bottom:2px solid transparent;transition:all .12s}
+.cfg-tab.active{color:#fff;border-bottom-color:var(--blue)}
+.cfg-tab:hover:not(.active){color:var(--text)}
+.cfg-section{display:none}.cfg-section.active{display:block}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px}
+.cfg-field{display:flex;flex-direction:column;gap:4px}
+.cfg-field.full{grid-column:1/-1}
+.cfg-field label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.cfg-input{padding:6px 9px;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;color:var(--text);font-family:var(--font);font-size:11px;outline:none;transition:border .12s;width:100%}
+.cfg-input:focus{border-color:var(--blue)}
+.cfg-input[type=number]{-moz-appearance:textfield}
+.cfg-input::-webkit-outer-spin-button,.cfg-input::-webkit-inner-spin-button{-webkit-appearance:none}
+.cfg-select{padding:6px 9px;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;color:var(--text);font-family:var(--font);font-size:11px;outline:none;width:100%;cursor:pointer}
+.cfg-select:focus{border-color:var(--blue)}
+.cfg-select option{background:var(--bg3)}
+.cfg-toggle{display:flex;align-items:center;gap:8px;padding:6px 0}
+.cfg-toggle input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:var(--blue)}
+.cfg-textarea{padding:6px 9px;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;color:var(--text);font-family:var(--font);font-size:11px;outline:none;width:100%;resize:vertical;min-height:80px;line-height:1.6}
+.cfg-textarea:focus{border-color:var(--blue)}
+.cfg-hint{font-size:9px;color:var(--text3)}
 </style>
 </head>
 <body>
@@ -162,6 +184,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
     <div class="ws-dot" id="ws-dot"></div>
     <span id="clock">--:--:--</span>
     <button class="btn-top" id="btn-pause" onclick="togglePause()">⏸ PAUSE</button>
+    <button class="btn-top" onclick="openConfig()">⚙ CONFIG</button>
   </div>
 </div>
 
@@ -223,6 +246,33 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 </div>
 
 </div><!-- #app -->
+
+<!-- ══ CONFIG MODAL ════════════════════════════════════════════ -->
+<div id="cfg-overlay" onclick="if(event.target===this)closeConfig()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;overflow-y:auto;padding:32px 0">
+  <div id="cfg-modal" style="width:680px;margin:0 auto;background:var(--bg1);border:1px solid var(--border2);border-radius:6px;overflow:hidden">
+
+    <!-- Modal header -->
+    <div style="display:flex;align-items:center;padding:14px 20px;background:var(--bg2);border-bottom:1px solid var(--border)">
+      <span style="font-size:13px;font-weight:700;color:#fff;letter-spacing:.5px">⚙ CONFIGURATION</span>
+      <span style="margin-left:10px;font-size:10px;color:var(--text3)">Changes apply live + saved to .env</span>
+      <button onclick="closeConfig()" style="margin-left:auto;background:transparent;border:none;color:var(--text2);font-size:16px;cursor:pointer;line-height:1">✕</button>
+    </div>
+
+    <!-- Section tabs -->
+    <div id="cfg-tabs" style="display:flex;border-bottom:1px solid var(--border);background:var(--bg2)"></div>
+
+    <!-- Fields area -->
+    <div id="cfg-fields" style="padding:20px;max-height:520px;overflow-y:auto"></div>
+
+    <!-- Footer -->
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 20px;background:var(--bg2);border-top:1px solid var(--border)">
+      <span id="cfg-msg" style="font-size:10px;color:var(--green);flex:1"></span>
+      <button onclick="closeConfig()" style="padding:5px 16px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-family:var(--font);font-size:10px;cursor:pointer">CANCEL</button>
+      <button onclick="saveConfig()" style="padding:5px 16px;border-radius:3px;border:none;background:var(--blue);color:#fff;font-family:var(--font);font-size:10px;font-weight:700;cursor:pointer">SAVE &amp; APPLY</button>
+    </div>
+
+  </div>
+</div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════
@@ -634,6 +684,150 @@ function fmtAge(iso) {
   if (sec < 3600) return Math.floor(sec/60) + 'm';
   return Math.floor(sec/3600) + 'h ' + Math.floor((sec%3600)/60) + 'm';
 }
+
+// ═══════════════════════════════════════════════════════════════
+// CONFIG MODAL
+// ═══════════════════════════════════════════════════════════════
+let cfgSchema = null;
+let cfgValues = null;
+let cfgActiveSection = null;
+
+async function openConfig() {
+  document.getElementById('cfg-overlay').style.display = 'block';
+  document.getElementById('cfg-msg').textContent = '';
+  try {
+    const res = await fetch('/api/config');
+    const data = await res.json();
+    cfgSchema = data.schema;
+    cfgValues = data.values;
+    buildConfigModal(cfgSchema, cfgValues);
+  } catch(e) {
+    document.getElementById('cfg-msg').textContent = 'Failed to load config: ' + e.message;
+    document.getElementById('cfg-msg').style.color = 'var(--red)';
+  }
+}
+
+function closeConfig() {
+  document.getElementById('cfg-overlay').style.display = 'none';
+}
+
+function buildConfigModal(schema, values) {
+  const tabsEl   = document.getElementById('cfg-tabs');
+  const fieldsEl = document.getElementById('cfg-fields');
+  tabsEl.innerHTML = '';
+  fieldsEl.innerHTML = '';
+
+  const sections = Object.keys(schema);
+  if (!cfgActiveSection || !sections.includes(cfgActiveSection)) cfgActiveSection = sections[0];
+
+  sections.forEach(sectionKey => {
+    const sec = schema[sectionKey];
+    // Tab button
+    const tab = document.createElement('button');
+    tab.className = 'cfg-tab' + (sectionKey === cfgActiveSection ? ' active' : '');
+    tab.textContent = sec.label.toUpperCase();
+    tab.onclick = () => switchCfgSection(sectionKey);
+    tabsEl.appendChild(tab);
+
+    // Section div
+    const div = document.createElement('div');
+    div.id = 'cfg-sec-' + sectionKey;
+    div.className = 'cfg-section' + (sectionKey === cfgActiveSection ? ' active' : '');
+    div.innerHTML = buildSectionFields(sec.fields, values);
+    fieldsEl.appendChild(div);
+  });
+}
+
+function buildSectionFields(fields, values) {
+  let html = '<div class="cfg-grid">';
+  for (const [key, meta] of Object.entries(fields)) {
+    const val = values[key] ?? '';
+    const isFull = meta.type === 'tags';
+    html += `<div class="cfg-field${isFull?' full':''}">`;
+    html += `<label for="cfg-${key}">${meta.label}</label>`;
+
+    if (meta.type === 'select') {
+      html += `<select class="cfg-select" id="cfg-${key}" name="${key}">`;
+      (meta.options||[]).forEach(o => {
+        html += `<option value="${o}"${o===String(val)?' selected':''}>${o}</option>`;
+      });
+      html += `</select>`;
+
+    } else if (meta.type === 'bool') {
+      const checked = val === true || val === 'True' || val === 'true';
+      html += `<div class="cfg-toggle">
+        <input type="checkbox" id="cfg-${key}" name="${key}"${checked?' checked':''}>
+        <span style="font-size:10px;color:var(--text2)">${checked?'Enabled':'Disabled'}</span>
+      </div>`;
+
+    } else if (meta.type === 'tags') {
+      html += `<textarea class="cfg-textarea" id="cfg-${key}" name="${key}" rows="5">${val}</textarea>`;
+      html += `<span class="cfg-hint">One symbol per line</span>`;
+
+    } else if (meta.type === 'password') {
+      html += `<input class="cfg-input" type="password" id="cfg-${key}" name="${key}" value="${val}" autocomplete="new-password">`;
+
+    } else {
+      const extras = meta.min!==undefined ? `min="${meta.min}"` : '';
+      const extras2 = meta.max!==undefined ? `max="${meta.max}"` : '';
+      const extras3 = meta.step!==undefined ? `step="${meta.step}"` : '';
+      html += `<input class="cfg-input" type="${meta.type==='number'?'number':'text'}" id="cfg-${key}" name="${key}" value="${val}" ${extras} ${extras2} ${extras3}>`;
+    }
+    html += `</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function switchCfgSection(sectionKey) {
+  cfgActiveSection = sectionKey;
+  document.querySelectorAll('.cfg-tab').forEach((t,i) => {
+    t.classList.toggle('active', Object.keys(cfgSchema)[i] === sectionKey);
+  });
+  document.querySelectorAll('.cfg-section').forEach(s => {
+    s.classList.toggle('active', s.id === 'cfg-sec-' + sectionKey);
+  });
+}
+
+async function saveConfig() {
+  const updates = {};
+  if (!cfgSchema) return;
+  for (const sec of Object.values(cfgSchema)) {
+    for (const [key, meta] of Object.entries(sec.fields)) {
+      const el = document.getElementById('cfg-' + key);
+      if (!el) continue;
+      if (meta.type === 'bool') {
+        updates[key] = el.checked;
+      } else {
+        updates[key] = el.value;
+      }
+    }
+  }
+  const msgEl = document.getElementById('cfg-msg');
+  msgEl.style.color = 'var(--text2)';
+  msgEl.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(updates),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      msgEl.style.color = 'var(--green)';
+      msgEl.textContent = '✓ Saved ' + data.updated.length + ' setting(s). Restart bot to apply MT5/server changes.';
+      cfgValues = {...cfgValues, ...updates};
+    } else {
+      throw new Error(data.detail || 'Save failed');
+    }
+  } catch(e) {
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = '✗ ' + e.message;
+  }
+}
+
+// Close on Escape
+document.addEventListener('keydown', e => { if (e.key==='Escape') closeConfig(); });
 
 // ═══════════════════════════════════════════════════════════════
 // BOOT

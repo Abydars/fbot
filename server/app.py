@@ -3,17 +3,145 @@ server/app.py — FastAPI application: REST endpoints + WebSocket + static UI.
 """
 
 import asyncio
+import importlib
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from loguru import logger
 import uvicorn
 
 import config
 from core.state import SharedState
 from server.ws_handler import websocket_endpoint, broadcast_loop, manager
+
+# ---------------------------------------------------------------------------
+# Config schema — all keys exposed to the UI
+# ---------------------------------------------------------------------------
+
+CONFIG_SCHEMA = {
+    "connection": {
+        "label": "MT5 Connection",
+        "fields": {
+            "EXNESS_ACCOUNT":  {"type": "number", "label": "Account Number"},
+            "EXNESS_PASSWORD": {"type": "password","label": "Password"},
+            "EXNESS_SERVER":   {"type": "text",    "label": "Server Name"},
+            "TRADING_MODE":    {"type": "select",  "label": "Mode", "options": ["demo","live"]},
+            "SYMBOL_SUFFIX":   {"type": "text",    "label": "Symbol Suffix (auto if blank)"},
+        }
+    },
+    "scanner": {
+        "label": "Scanner",
+        "fields": {
+            "SCANNER_INTERVAL":   {"type": "number", "label": "Scan Interval (s)",    "min":5,  "max":300},
+            "SCANNER_MIN_SCORE":  {"type": "number", "label": "Min Score to Alert",   "min":0,  "max":100},
+            "PRIMARY_TIMEFRAME":  {"type": "select", "label": "Primary Timeframe",    "options":["M1","M5","M15","M30","H1","H4","D1"]},
+            "TREND_TIMEFRAME":    {"type": "select", "label": "Trend Timeframe",      "options":["M5","M15","M30","H1","H4","D1"]},
+            "EMA_FAST":           {"type": "number", "label": "EMA Fast Period",      "min":2,  "max":100},
+            "EMA_SLOW":           {"type": "number", "label": "EMA Slow Period",      "min":5,  "max":200},
+            "RSI_PERIOD":         {"type": "number", "label": "RSI Period",           "min":2,  "max":50},
+            "ATR_PERIOD":         {"type": "number", "label": "ATR Period",           "min":2,  "max":50},
+        }
+    },
+    "risk": {
+        "label": "Risk Management",
+        "fields": {
+            "RISK_PER_TRADE":          {"type": "number", "label": "Risk Per Trade (%)",      "min":0.1, "max":10,  "step":0.1},
+            "MAX_OPEN_TRADES":         {"type": "number", "label": "Max Open Trades",         "min":1,   "max":20},
+            "MAX_TRADES_PER_SYMBOL":   {"type": "number", "label": "Max Trades Per Symbol",   "min":1,   "max":5},
+            "MIN_RR_RATIO":            {"type": "number", "label": "Min R:R Ratio",           "min":0.5, "max":10, "step":0.5},
+            "BREAKEVEN_AT_RR":         {"type": "number", "label": "Breakeven at R:R",        "min":0.5, "max":5,  "step":0.5},
+            "TRAILING_STOP":           {"type": "bool",   "label": "Trailing Stop"},
+            "MAX_LOT_SIZE":            {"type": "number", "label": "Max Lot Size",            "min":0.01,"max":100,"step":0.01},
+            "MAX_DAILY_DRAWDOWN_PCT":  {"type": "number", "label": "Max Daily Drawdown (%)", "min":0.5, "max":50, "step":0.5},
+            "MIN_SL_PIPS":             {"type": "number", "label": "Min SL (pips)",          "min":1,   "max":100},
+            "DEFAULT_MAX_SPREAD":      {"type": "number", "label": "Max Spread Default (pips)","min":0.5,"max":20,"step":0.5},
+        }
+    },
+    "session": {
+        "label": "Session Filter",
+        "fields": {
+            "LONDON_OPEN_HOUR":  {"type": "number", "label": "London Open (UTC hour)",  "min":0, "max":23},
+            "LONDON_CLOSE_HOUR": {"type": "number", "label": "London Close (UTC hour)", "min":0, "max":23},
+            "NY_OPEN_HOUR":      {"type": "number", "label": "NY Open (UTC hour)",      "min":0, "max":23},
+            "NY_CLOSE_HOUR":     {"type": "number", "label": "NY Close (UTC hour)",     "min":0, "max":23},
+        }
+    },
+    "symbols": {
+        "label": "Watchlist",
+        "fields": {
+            "SYMBOLS_WATCHLIST": {"type": "tags", "label": "Symbols (one per line)"},
+        }
+    },
+}
+
+
+def _read_config_values() -> dict:
+    """Return current live values for all schema keys."""
+    values = {}
+    for section in CONFIG_SCHEMA.values():
+        for key in section["fields"]:
+            val = getattr(config, key, None)
+            if isinstance(val, list):
+                val = "\n".join(val)
+            values[key] = val
+    return values
+
+
+def _write_env(updates: dict[str, Any]) -> None:
+    """Persist key=value pairs to the .env file."""
+    env_path = Path(__file__).parent.parent / ".env"
+    # Read existing lines
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    existing_keys = {}
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k = stripped.split("=", 1)[0].strip()
+            existing_keys[k] = i
+
+    for key, val in updates.items():
+        # Normalise value
+        if isinstance(val, list):
+            val = "\n".join(val)
+        line_str = f"{key}={val}"
+        if key in existing_keys:
+            lines[existing_keys[key]] = line_str
+        else:
+            lines.append(line_str)
+
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _apply_config(updates: dict[str, Any]) -> None:
+    """Apply updates to the live config module without restarting."""
+    for key, val in updates.items():
+        field_meta = None
+        for section in CONFIG_SCHEMA.values():
+            if key in section["fields"]:
+                field_meta = section["fields"][key]
+                break
+
+        if field_meta is None:
+            continue
+
+        ftype = field_meta["type"]
+        if ftype == "number":
+            # Preserve int vs float
+            orig = getattr(config, key, 0)
+            val = int(val) if isinstance(orig, int) else float(val)
+        elif ftype == "bool":
+            val = str(val).lower() in ("true", "1", "yes")
+        elif ftype == "tags":
+            val = [s.strip() for s in str(val).splitlines() if s.strip()]
+        else:
+            val = str(val)
+
+        setattr(config, key, val)
+        logger.info(f"Config updated: {key} = {val!r}")
 
 
 def create_app(state: SharedState) -> FastAPI:
@@ -105,6 +233,20 @@ def create_app(state: SharedState) -> FastAPI:
         if not success:
             raise HTTPException(status_code=400, detail=f"Failed to close ticket {ticket}")
         return JSONResponse({"status": "ok", "ticket": ticket})
+
+    @app.get("/api/config")
+    async def api_config_get():
+        return JSONResponse({"schema": CONFIG_SCHEMA, "values": _read_config_values()})
+
+    @app.post("/api/config")
+    async def api_config_post(body: dict):
+        try:
+            _apply_config(body)
+            _write_env(body)
+            await state.add_alert("Config updated and saved to .env", "INFO")
+            return JSONResponse({"status": "ok", "updated": list(body.keys())})
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.post("/api/pause")
     async def api_pause():
