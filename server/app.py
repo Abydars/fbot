@@ -58,6 +58,7 @@ CONFIG_SCHEMA = {
             "MAX_LOT_SIZE":            {"type": "number", "label": "Max Lot Size",            "min":0.01,"max":100,"step":0.01},
             "MAX_DAILY_DRAWDOWN_PCT":  {"type": "number", "label": "Max Daily Drawdown (%)", "min":0.5, "max":50, "step":0.5},
             "MIN_SL_PIPS":             {"type": "number", "label": "Min SL (pips)",          "min":1,   "max":100},
+            "SL_ATR_CAP":              {"type": "number", "label": "Max SL (× ATR)",          "min":0.5, "max":10, "step":0.5},
             "DEFAULT_MAX_SPREAD":      {"type": "number", "label": "Max Spread Default (pips)","min":0.5,"max":20,"step":0.5},
         }
     },
@@ -91,29 +92,39 @@ def _read_config_values() -> dict:
     return values
 
 
-def _write_env(updates: dict[str, Any]) -> None:
-    """Persist key=value pairs to the .env file."""
-    env_path = Path(__file__).parent.parent / ".env"
-    # Read existing lines
-    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    existing_keys = {}
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            k = stripped.split("=", 1)[0].strip()
-            existing_keys[k] = i
+def _write_json_config(updates: dict[str, Any]) -> None:
+    """Persist runtime config to bot_config.json (never touches .env)."""
+    import json
+    json_path = Path(__file__).parent.parent / config.CONFIG_JSON_PATH
+    existing: dict = {}
+    if json_path.exists():
+        try:
+            existing = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
 
+    # Coerce to the same types that _apply_config produces before saving
     for key, val in updates.items():
-        # Normalise value
-        if isinstance(val, list):
-            val = "\n".join(val)
-        line_str = f"{key}={val}"
-        if key in existing_keys:
-            lines[existing_keys[key]] = line_str
+        field_meta = None
+        for section in CONFIG_SCHEMA.values():
+            if key in section["fields"]:
+                field_meta = section["fields"][key]
+                break
+        if field_meta is None:
+            continue
+        ftype = field_meta["type"]
+        if ftype == "number":
+            orig = getattr(config, key, 0)
+            val = int(val) if isinstance(orig, int) else float(val)
+        elif ftype == "bool":
+            val = str(val).lower() in ("true", "1", "yes")
+        elif ftype == "tags":
+            val = [s.strip() for s in str(val).splitlines() if s.strip()]
         else:
-            lines.append(line_str)
+            val = str(val)
+        existing[key] = val
 
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    json_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
 
 
 def _apply_config(updates: dict[str, Any]) -> None:
@@ -246,8 +257,8 @@ def create_app(state: SharedState) -> FastAPI:
     async def api_config_post(body: dict):
         try:
             _apply_config(body)
-            _write_env(body)
-            await state.add_alert("Config updated and saved to .env", "INFO")
+            _write_json_config(body)
+            await state.add_alert("Config updated and saved.", "INFO")
             return JSONResponse({"status": "ok", "updated": list(body.keys())})
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))

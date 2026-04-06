@@ -183,7 +183,10 @@ class PullbackStrategy:
         atr = scanner_result.atr
 
         # --- SL calculation ---
-        swing_window = df_m15.iloc[-50:]
+        # Use recent 20-bar swing (5 hours on M15) with a small ATR buffer.
+        # Cap total SL distance at SL_ATR_CAP × ATR to avoid runaway TP on
+        # volatile pairs (XAUUSD, BTCUSD, JPY crosses).
+        swing_window = df_m15.iloc[-20:]
         if direction == "LONG":
             swing_low = swing_window["low"].min()
             sl_price  = swing_low - (config.SL_ATR_BUFFER * atr)
@@ -192,7 +195,15 @@ class PullbackStrategy:
             sl_price   = swing_high + (config.SL_ATR_BUFFER * atr)
 
         sl_distance = abs(entry_price - sl_price)
-        sl_pips     = sl_distance / pip_sz
+        # Cap SL so TP stays at a reachable distance
+        max_sl_distance = atr * config.SL_ATR_CAP
+        if sl_distance > max_sl_distance:
+            sl_distance = max_sl_distance
+            sl_price = (
+                entry_price - sl_distance if direction == "LONG"
+                else entry_price + sl_distance
+            )
+        sl_pips = sl_distance / pip_sz
 
         # Minimum SL pips floor
         if sl_pips < config.MIN_SL_PIPS:
@@ -320,7 +331,15 @@ class BreakoutStrategy:
             sl_price = consol_candles["high"].max() + scanner_result.atr * 0.3
 
         sl_distance = abs(breakout_level - sl_price)
-        sl_pips     = sl_distance / pip_sz
+        # Cap SL at SL_ATR_CAP × ATR
+        max_sl_distance = scanner_result.atr * config.SL_ATR_CAP
+        if sl_distance > max_sl_distance:
+            sl_distance = max_sl_distance
+            sl_price = (
+                breakout_level - sl_distance if direction == "LONG"
+                else breakout_level + sl_distance
+            )
+        sl_pips = sl_distance / pip_sz
 
         if sl_pips < config.MIN_SL_PIPS:
             sl_pips = config.MIN_SL_PIPS

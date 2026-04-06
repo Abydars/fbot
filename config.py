@@ -72,8 +72,11 @@ MIN_RR_RATIO = 2.0           # minimum reward-to-risk required to take a trade
 MAX_LOT_SIZE = 5.0           # hard cap per trade
 MAX_DAILY_DRAWDOWN_PCT = 5.0 # stop trading if daily drawdown exceeds this %
 
-# SL buffer multiplier (applied to ATR)
-SL_ATR_BUFFER = 0.5
+# SL buffer multiplier (applied to ATR beyond swing high/low)
+SL_ATR_BUFFER = 0.3
+
+# Maximum SL distance as a multiple of ATR (caps runaway SL on volatile pairs)
+SL_ATR_CAP = 2.0
 
 # Minimum SL distance in pips (symbol-independent floor)
 MIN_SL_PIPS = 10.0
@@ -109,3 +112,20 @@ DB_PATH = "trades.db"
 # ---------------------------------------------------------------------------
 LOG_LEVEL = "INFO"
 LOG_DIR = "logs"
+
+# ---------------------------------------------------------------------------
+# Runtime config file (non-credential settings, editable via UI)
+# ---------------------------------------------------------------------------
+CONFIG_JSON_PATH = "bot_config.json"
+
+# Apply any previously-saved runtime config overrides
+import json as _json
+from pathlib import Path as _Path
+_config_json = _Path(__file__).parent / CONFIG_JSON_PATH
+if _config_json.exists():
+    try:
+        for _k, _v in _json.loads(_config_json.read_text()).items():
+            if _k in globals():
+                globals()[_k] = _v
+    except Exception:
+        pass
