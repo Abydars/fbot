@@ -33,6 +33,7 @@ class OrderManager:
     async def run(self):
         logger.info("OrderManager started.")
         await self._init_db()
+        await self._restore_state()
         await asyncio.gather(
             self._strategy_loop(),
             self._monitor_loop(),
@@ -79,6 +80,92 @@ class OrderManager:
             """)
             await db.commit()
         logger.info(f"Database ready: {self._db_path}")
+
+    # ------------------------------------------------------------------
+    # State restoration after restart
+    # ------------------------------------------------------------------
+
+    async def _restore_state(self):
+        """
+        Re-populate SharedState from the DB so the bot resumes seamlessly
+        after a restart.
+
+        - Trade history  : last 100 closed trades
+        - Daily stats    : trades_today / wins_today from today's closed rows
+        - Open positions : rows still marked OPEN in the DB; live price/P&L
+                           will be refreshed by the first monitor_positions() cycle
+        """
+        from datetime import date
+        today_prefix = date.today().isoformat()  # "2024-01-15"
+
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # 1. Closed trade history (oldest → newest so list is in order)
+            async with db.execute(
+                "SELECT * FROM trades WHERE status='CLOSED' "
+                "ORDER BY id DESC LIMIT 100"
+            ) as cur:
+                rows = await cur.fetchall()
+
+            for row in reversed(rows):
+                self.state.trade_history.append(TradeRecord(
+                    ticket=row["ticket"],
+                    symbol=row["symbol"],
+                    direction=row["direction"],
+                    signal_type=row["signal_type"] or "",
+                    lot_size=row["lot_size"],
+                    entry_price=row["entry_price"],
+                    exit_price=row["exit_price"] or 0.0,
+                    sl_price=row["sl_price"] or 0.0,
+                    tp_price=row["tp_price"] or 0.0,
+                    pnl_pips=row["pnl_pips"] or 0.0,
+                    pnl_currency=row["pnl_currency"] or 0.0,
+                    open_time=row["open_time"] or "",
+                    close_time=row["close_time"] or "",
+                    status=row["status"],
+                ))
+
+            # 2. Today's win/loss counts
+            async with db.execute(
+                "SELECT COUNT(*), "
+                "SUM(CASE WHEN pnl_currency > 0 THEN 1 ELSE 0 END) "
+                "FROM trades WHERE status='CLOSED' AND close_time LIKE ?",
+                (f"{today_prefix}%",),
+            ) as cur:
+                row = await cur.fetchone()
+            if row and row[0]:
+                self.state.trades_today = int(row[0])
+                self.state.wins_today   = int(row[1] or 0)
+
+            # 3. Open positions — restore from DB; monitor loop will sync live data
+            async with db.execute(
+                "SELECT * FROM trades WHERE status='OPEN'"
+            ) as cur:
+                rows = await cur.fetchall()
+
+            for row in rows:
+                pos = PositionState(
+                    ticket=row["ticket"],
+                    symbol=row["symbol"],
+                    direction=row["direction"],
+                    signal_type=row["signal_type"] or "",
+                    lot_size=row["lot_size"],
+                    entry_price=row["entry_price"],
+                    current_price=row["entry_price"],   # refreshed on next monitor tick
+                    sl_price=row["sl_price"] or 0.0,
+                    tp_price=row["tp_price"] or 0.0,
+                    open_time=row["open_time"] or "",
+                    comment=row["comment"] or "",
+                    best_price=row["entry_price"],       # conservative trailing-stop seed
+                )
+                self.state.open_positions[pos.ticket] = pos
+
+        logger.info(
+            f"State restored — history: {len(self.state.trade_history)} trades | "
+            f"open: {len(self.state.open_positions)} positions | "
+            f"today: {self.state.trades_today} trades ({self.state.wins_today} wins)"
+        )
 
     # ------------------------------------------------------------------
     # Strategy evaluation loop
