@@ -61,6 +61,7 @@ class MT5Client:
 
     def __init__(self):
         self._connected = False
+        self._warned_no_data: set[str] = set()  # suppress repeated OHLCV warnings
 
     # ------------------------------------------------------------------
     # Connection
@@ -125,8 +126,9 @@ class MT5Client:
                 "Update TRADING_MODE in config.py or .env"
             )
 
-        # Validate watchlist symbols
+        # Validate watchlist symbols + sanity-check data access
         await self._validate_symbols()
+        await self._check_data_access()
         return True
 
     async def disconnect(self):
@@ -189,6 +191,30 @@ class MT5Client:
             logger.debug(f"Preload {symbol} attempt {attempt}/{retries}: {err}")
             await asyncio.sleep(delay)
         logger.warning(f"Could not preload history for {symbol} — will retry during scan.")
+
+    async def _check_data_access(self):
+        """
+        Quick sanity check: try to fetch 5 H1 bars for the first watchlist symbol.
+        If this fails, log a single clear warning instead of spamming per-symbol
+        errors during every scanner cycle.
+        """
+        probe = config.SYMBOLS_WATCHLIST[0]
+        tf = TIMEFRAMES.get("H1")
+        rates = await asyncio.to_thread(mt5.copy_rates_from_pos, probe, tf, 0, 5)
+        if rates is None or len(rates) == 0:
+            err = await asyncio.to_thread(mt5.last_error)
+            logger.warning("=" * 60)
+            logger.warning("  DATA ACCESS CHECK FAILED")
+            logger.warning(f"  Probe symbol : {probe}")
+            logger.warning(f"  MT5 error    : {err}")
+            logger.warning("  Possible causes:")
+            logger.warning("  1. mt5linux server not running inside Wine")
+            logger.warning("  2. Market closed + no cached history (open a chart in MT5)")
+            logger.warning("  3. Symbol not in Market Watch")
+            logger.warning("  Bot will keep retrying — scanner results will be empty")
+            logger.warning("=" * 60)
+        else:
+            logger.success(f"Data access OK — {len(rates)} bars fetched for {probe}")
 
     # ------------------------------------------------------------------
     # Account info
@@ -282,11 +308,13 @@ class MT5Client:
                 )
                 await asyncio.sleep(retry_delay)
             else:
-                logger.warning(
-                    f"No OHLCV data for {symbol} {timeframe} after {retries} attempts "
-                    f"(MT5 error: {err}). "
-                    f"If market is closed open a chart for {symbol} in MT5 terminal."
-                )
+                key = f"{symbol}:{timeframe}"
+                if key not in self._warned_no_data:
+                    logger.warning(
+                        f"No OHLCV data for {symbol} {timeframe} "
+                        f"(MT5 error: {err}). Suppressing further warnings for this symbol."
+                    )
+                    self._warned_no_data.add(key)
         return None
 
     async def get_tick(self, symbol: str) -> Optional[dict]:
