@@ -701,15 +701,53 @@ async function togglePause() {
 }
 
 async function closePos(ticket) {
-  if (!confirm(`Close position #${ticket}?`)) return;
-  await fetch(`/api/close/${ticket}`, {method:'POST'});
+  const btn = document.querySelector(`.pos-card[data-ticket="${ticket}"] .btn-close`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Closing…'; }
+  try {
+    const res = await fetch(`/api/close/${ticket}`, {method:'POST'});
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      showToast(`Close failed: ${err.detail || res.status}`, 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '✕ CLOSE'; }
+    }
+  } catch(e) {
+    showToast(`Close error: ${e.message}`, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '✕ CLOSE'; }
+  }
 }
 
 async function closeAll() {
-  const positions = lastData.positions || [];
+  const positions = lastData && lastData.positions || [];
   if (!positions.length) return;
-  if (!confirm(`Close all ${positions.length} position(s)?`)) return;
-  for (const p of positions) await fetch(`/api/close/${p.ticket}`, {method:'POST'});
+  try {
+    const res = await fetch('/api/close_all', {method:'POST'});
+    if (res.ok) {
+      const d = await res.json();
+      showToast(`Closed ${d.closed.length} position(s)${d.failed.length ? `, ${d.failed.length} failed` : ''}`, d.failed.length ? 'error' : 'ok');
+    } else {
+      const err = await res.json().catch(()=>({}));
+      showToast(`Close all failed: ${err.detail || res.status}`, 'error');
+    }
+  } catch(e) {
+    showToast(`Close all error: ${e.message}`, 'error');
+  }
+}
+
+function showToast(msg, type) {
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:8px 18px;border-radius:4px;font-size:11px;font-weight:700;z-index:9999;transition:opacity .3s;pointer-events:none';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = type === 'error' ? '#8b2020' : '#1a3a2a';
+  t.style.color = type === 'error' ? '#ff8080' : '#4caf82';
+  t.style.border = `1px solid ${type === 'error' ? '#ff4444' : '#2d6a4f'}`;
+  t.style.opacity = '1';
+  clearTimeout(t._hide);
+  t._hide = setTimeout(() => { t.style.opacity = '0'; }, 3000);
 }
 
 function manualSignal(dir) {

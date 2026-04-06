@@ -605,32 +605,52 @@ class MT5Client:
         )
         tick = await self.get_tick(self._strip_suffix(pos.symbol))
         if tick is None:
+            logger.error(f"close_position: could not get tick for {pos.symbol}")
             return False
 
         close_price = tick["bid"] if pos.type == mt5.ORDER_TYPE_BUY else tick["ask"]
 
-        request = {
-            "action":       mt5.TRADE_ACTION_DEAL,
-            "symbol":       pos.symbol,
-            "volume":       pos.volume,
-            "type":         close_type,
-            "position":     ticket,
-            "price":        close_price,
-            "deviation":    10,
-            "magic":        20240101,
-            "comment":      "fbot-close",
-            "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+        # Determine which filling modes this symbol supports (bitmask).
+        # Prefer RETURN (most compatible for market close on Exness),
+        # fall back to IOC then FOK.  Retry on TRADE_RETCODE_INVALID_FILL (10030).
+        sym_info_raw = await asyncio.to_thread(mt5.symbol_info, pos.symbol)
+        supported    = sym_info_raw.filling_mode if sym_info_raw else 0
+        # filling_mode bitmask: 1=FOK, 2=IOC; 0 or unset → try RETURN first
+        fill_order = []
+        if supported == 0:
+            fill_order = [mt5.ORDER_FILLING_RETURN, mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK]
+        else:
+            if supported & 2: fill_order.append(mt5.ORDER_FILLING_IOC)
+            if supported & 1: fill_order.append(mt5.ORDER_FILLING_FOK)
+            fill_order.append(mt5.ORDER_FILLING_RETURN)  # always try as last resort
+
+        base_request = {
+            "action":    mt5.TRADE_ACTION_DEAL,
+            "symbol":    pos.symbol,
+            "volume":    pos.volume,
+            "type":      close_type,
+            "position":  ticket,
+            "price":     close_price,
+            "deviation": 20,
+            "magic":     20240101,
+            "comment":   "fbot-close",
+            "type_time": mt5.ORDER_TIME_GTC,
         }
 
-        result = await asyncio.to_thread(mt5.order_send, request)
-        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            code = result.retcode if result else "None"
-            logger.error(f"close_position failed ticket={ticket}: retcode={code}")
-            return False
+        for filling in fill_order:
+            request = {**base_request, "type_filling": filling}
+            result  = await asyncio.to_thread(mt5.order_send, request)
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                logger.success(f"Position closed | ticket={ticket} filling={filling}")
+                return True
+            code = result.retcode if result else None
+            if code != 10030:   # 10030 = invalid fill — try next mode
+                break
 
-        logger.success(f"Position closed | ticket={ticket}")
-        return True
+        code = result.retcode if result else "None"
+        msg  = result.comment if result else ""
+        logger.error(f"close_position failed ticket={ticket}: retcode={code} {msg}")
+        return False
 
     async def modify_position(self, ticket: int, sl: float, tp: float) -> bool:
         """Modify SL and TP of an open position."""

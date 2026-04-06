@@ -216,6 +216,18 @@ def create_app(state: SharedState) -> FastAPI:
             raise HTTPException(status_code=400, detail=f"Failed to close ticket {ticket}")
         return JSONResponse({"status": "ok", "ticket": ticket})
 
+    @app.post("/api/close_all")
+    async def api_close_all():
+        om = _get_om()
+        if om is None:
+            raise HTTPException(status_code=503, detail="Order manager not ready")
+        tickets = list(state.open_positions.keys())
+        results = {"closed": [], "failed": []}
+        for ticket in tickets:
+            ok = await om.close_position(ticket)
+            (results["closed"] if ok else results["failed"]).append(ticket)
+        return JSONResponse(results)
+
     @app.get("/api/config")
     async def api_config_get():
         return JSONResponse({"schema": CONFIG_SCHEMA, "values": _read_config_values()})
