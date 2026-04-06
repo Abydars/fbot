@@ -118,7 +118,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .dir-badge.short{background:#2e0d0d;color:var(--red);border:1px solid var(--red2)}
 .strat-badge{padding:1px 5px;border-radius:2px;font-size:9px;font-weight:700;background:#1a1a2e;color:var(--blue);border:1px solid #2040a0}
 .pos-pnl{margin-left:auto;text-align:right}
-.pnl-val{font-size:12px;font-weight:700}
+.pnl-val{font-size:12px;font-weight:700;transition:color .3s,opacity .2s}
 .roe-val{font-size:9px;color:var(--text2)}
 .pnl-val.pos,.roe-val.pos{color:var(--green)}
 .pnl-val.neg,.roe-val.neg{color:var(--red)}
@@ -294,6 +294,10 @@ let alertLog = [];
 setInterval(() => {
   document.getElementById('clock').textContent =
     new Date().toLocaleTimeString('en-GB', {timeZone:'UTC', hour12:false}) + ' UTC';
+  // Tick position age displays every second
+  document.querySelectorAll('[data-age]').forEach(el => {
+    el.textContent = fmtAge(el.dataset.openTime);
+  });
 }, 1000);
 
 // ═══════════════════════════════════════════════════════════════
@@ -301,40 +305,44 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════════
 function initChart() {
   const el = document.getElementById('lwchart');
+  const c  = document.getElementById('chart-container');
+
   lwChart = LightweightCharts.createChart(el, {
+    width:  c.clientWidth,
+    height: c.clientHeight,
     layout: { background:{color:'#0b0b0f'}, textColor:'#787b86' },
     grid:   { vertLines:{color:'#1f1f2e'}, horzLines:{color:'#1f1f2e'} },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor:'#1f1f2e' },
+    rightPriceScale: { borderColor:'#1f1f2e', scaleMargins:{ top:0.05, bottom:0.15 } },
     timeScale: { borderColor:'#1f1f2e', timeVisible:true, secondsVisible:false },
-    watermark: { visible:false },
   });
 
+  // Candlestick series on the default right price scale
   candleSeries = lwChart.addCandlestickSeries({
     upColor:'#26a69a', downColor:'#ef5350',
     borderUpColor:'#26a69a', borderDownColor:'#ef5350',
     wickUpColor:'#26a69a',   wickDownColor:'#ef5350',
   });
 
-  // Volume series — must use a named overlay scale with margins set
-  // via priceScale().applyOptions(), NOT in series constructor (v4 API)
+  // Volume — use the LEFT scale as a contained overlay so it cannot
+  // interfere with the main (right) price scale.
   const volSeries = lwChart.addHistogramSeries({
-    priceFormat: { type: 'volume' },
-    priceScaleId: 'vol',
-    lastValueVisible: false,
-    priceLineVisible: false,
+    priceFormat:       { type:'volume' },
+    priceScaleId:      'left',
+    lastValueVisible:  false,
+    priceLineVisible:  false,
   });
-  lwChart.priceScale('vol').applyOptions({
-    scaleMargins: { top: 0.85, bottom: 0 },
+  lwChart.priceScale('left').applyOptions({
+    visible:      false,                          // hide the left axis label
+    scaleMargins: { top: 0.85, bottom: 0 },      // occupy only bottom 15%
   });
   lwChart._volSeries = volSeries;
 
-  // Resize observer
+  // Keep chart sized to container
   const ro = new ResizeObserver(() => {
-    const c = document.getElementById('chart-container');
     lwChart.applyOptions({ width: c.clientWidth, height: c.clientHeight });
   });
-  ro.observe(document.getElementById('chart-container'));
+  ro.observe(c);
 }
 
 function drawPriceLines(entry, sl, tp) {
@@ -390,6 +398,10 @@ function handleData(d) {
     renderBottomBar(d.account, d.bot_status, d.positions);
     updateTicker(d.alerts);
     updateChartPrice(d.scanner);
+    // Auto-select the highest-scored symbol on first data arrival
+    if (!activeSymbol && d.scanner && d.scanner.length > 0) {
+      selectSymbol(d.scanner[0].symbol);
+    }
   }
 }
 
@@ -506,62 +518,83 @@ function renderPositions(positions) {
   positions.forEach(p => {
     seen.add(String(p.ticket));
     let card = existing[p.ticket];
-    if (!card) {
+    const isNew = !card;
+    if (isNew) {
       card = document.createElement('div');
       card.className = 'pos-card';
       card.dataset.ticket = p.ticket;
       list.appendChild(card);
     }
-    const pnl   = p.pnl_currency || 0;
-    const pips  = p.pnl_pips || 0;
-    const isPos = pnl >= 0;
-    const dirCls= (p.direction==='LONG'?'long':'short');
+
+    const pnl    = p.pnl_currency || 0;
+    const pips   = p.pnl_pips || 0;
+    const isPos  = pnl >= 0;
+    const dirCls = p.direction === 'LONG' ? 'long' : 'short';
     const entryChg = p.current_price && p.entry_price
-      ? ((p.current_price - p.entry_price) / p.entry_price * 100).toFixed(2)
-      : '0.00';
+      ? ((p.current_price - p.entry_price) / p.entry_price * 100).toFixed(2) : '0.00';
     const slPct = p.sl_price && p.entry_price
-      ? ((p.sl_price - p.entry_price) / p.entry_price * 100).toFixed(2)
-      : '0.00';
+      ? ((p.sl_price - p.entry_price) / p.entry_price * 100).toFixed(2) : '0.00';
     const tpPct = p.tp_price && p.entry_price
-      ? ((p.tp_price - p.entry_price) / p.entry_price * 100).toFixed(2)
-      : '0.00';
+      ? ((p.tp_price - p.entry_price) / p.entry_price * 100).toFixed(2) : '0.00';
 
-    card.innerHTML = `
-      <div class="pos-card-head">
-        <span class="pos-sym">${p.symbol}</span>
-        <span class="dir-badge ${dirCls}">${p.direction}</span>
-        <span class="strat-badge">${p.signal_type||'MANUAL'}</span>
-        <div class="pos-pnl">
-          <div class="pnl-val ${isPos?'pos':'neg'}">${isPos?'+':''}$${fmt2(pnl)}</div>
-          <div class="roe-val ${isPos?'pos':'neg'}">${isPos?'+':''}${pips.toFixed(1)}p</div>
+    if (isNew) {
+      // Full render only on first appearance
+      card.innerHTML = `
+        <div class="pos-card-head">
+          <span class="pos-sym">${p.symbol}</span>
+          <span class="dir-badge ${dirCls}">${p.direction}</span>
+          <span class="strat-badge">${p.signal_type||'MANUAL'}</span>
+          <div class="pos-pnl">
+            <div class="pnl-val" data-pnl></div>
+            <div class="roe-val" data-roe></div>
+          </div>
         </div>
-      </div>
-      <div class="pos-grid">
-        <div class="pos-fld">
-          <div class="lbl">ENTRY</div>
-          <div class="val">${fmtP(p.entry_price)}</div>
+        <div class="pos-grid">
+          <div class="pos-fld"><div class="lbl">ENTRY</div><div class="val">${fmtP(p.entry_price)}</div></div>
+          <div class="pos-fld">
+            <div class="lbl">MARK</div>
+            <div class="val" data-mark></div>
+            <div class="chg" data-mark-chg></div>
+          </div>
+          <div class="pos-fld">
+            <div class="lbl">SL</div>
+            <div class="val r">${fmtP(p.sl_price)}</div>
+            <div class="chg n">${slPct}%</div>
+          </div>
+          <div class="pos-fld">
+            <div class="lbl">TP TARGET</div>
+            <div class="val g">${fmtP(p.tp_price)}</div>
+            <div class="chg p">${tpPct}%</div>
+          </div>
+          <div class="pos-fld"><div class="lbl">LOT</div><div class="val">${p.lot_size}</div></div>
+          <div class="pos-fld"><div class="lbl">OPEN</div><div class="val" data-age data-open-time="${p.open_time}"></div></div>
         </div>
-        <div class="pos-fld">
-          <div class="lbl">MARK</div>
-          <div class="val">${fmtP(p.current_price)}</div>
-          <div class="chg ${parseFloat(entryChg)>=0?'p':'n'}">${entryChg>=0?'+':''}${entryChg}%</div>
-        </div>
-        <div class="pos-fld">
-          <div class="lbl">SL</div>
-          <div class="val r">${fmtP(p.sl_price)}</div>
-          <div class="chg n">${slPct}%</div>
-        </div>
-        <div class="pos-fld">
-          <div class="lbl">TP TARGET</div>
-          <div class="val g">${fmtP(p.tp_price)}</div>
-          <div class="chg p">${tpPct}%</div>
-        </div>
-        <div class="pos-fld"><div class="lbl">LOT</div><div class="val">${p.lot_size}</div></div>
-        <div class="pos-fld"><div class="lbl">OPEN</div><div class="val">${fmtAge(p.open_time)}</div></div>
-      </div>
-      <button class="btn-close" onclick="closePos(${p.ticket})">✕ CLOSE</button>`;
+        <button class="btn-close" onclick="closePos(${p.ticket})">✕ CLOSE</button>`;
+    }
 
-    // If this is the active chart symbol, draw lines
+    // Surgical live updates (run every WS tick, no DOM rebuild)
+    const pnlEl = card.querySelector('[data-pnl]');
+    const newPnlTxt = (isPos?'+':'') + '$' + fmt2(pnl);
+    if (pnlEl && pnlEl.textContent !== newPnlTxt) {
+      pnlEl.textContent = newPnlTxt;
+      pnlEl.className = 'pnl-val ' + (isPos?'pos':'neg');
+      pnlEl.style.transition = 'none';
+      pnlEl.style.opacity = '0.4';
+      requestAnimationFrame(() => { pnlEl.style.transition='opacity .2s'; pnlEl.style.opacity='1'; });
+    }
+    const roeEl = card.querySelector('[data-roe]');
+    if (roeEl) {
+      roeEl.textContent = (isPos?'+':'') + pips.toFixed(1) + 'p';
+      roeEl.className = 'roe-val ' + (isPos?'pos':'neg');
+    }
+    const markEl = card.querySelector('[data-mark]');
+    if (markEl) markEl.textContent = fmtP(p.current_price);
+    const markChgEl = card.querySelector('[data-mark-chg]');
+    if (markChgEl) {
+      markChgEl.textContent = (parseFloat(entryChg)>=0?'+':'') + entryChg + '%';
+      markChgEl.className = 'chg ' + (parseFloat(entryChg)>=0?'p':'n');
+    }
+
     if (p.symbol === activeSymbol) drawPriceLines(p.entry_price, p.sl_price, p.tp_price);
   });
 
