@@ -100,6 +100,7 @@ class TradeRecord:
     open_time: str = ""
     close_time: str = ""
     status: str = ""           # "CLOSED" | "CANCELLED"
+    close_reason: str = ""     # "TP HIT" | "SL HIT" | "STOP OUT" | "MANUAL"
 
     def to_dict(self) -> dict:
         return {
@@ -110,11 +111,14 @@ class TradeRecord:
             "lot_size": self.lot_size,
             "entry_price": self.entry_price,
             "exit_price": self.exit_price,
+            "sl_price": self.sl_price,
+            "tp_price": self.tp_price,
             "pnl_pips": round(self.pnl_pips, 1),
             "pnl_currency": round(self.pnl_currency, 2),
             "open_time": self.open_time,
             "close_time": self.close_time,
             "status": self.status,
+            "close_reason": self.close_reason,
         }
 
 

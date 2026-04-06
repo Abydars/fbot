@@ -95,11 +95,25 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 #lwchart{width:100%;height:100%}
 #history-panel{flex:1;overflow-y:auto;display:none}
 .hist-table{width:100%;border-collapse:collapse}
-.hist-table th{padding:7px 10px;text-align:left;font-size:9px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg1)}
-.hist-table td{padding:6px 10px;font-size:10px;border-bottom:1px solid var(--border)}
-.hist-row.win td:first-child{border-left:2px solid var(--green)}
-.hist-row.loss td:first-child{border-left:2px solid var(--red)}
-.hist-row:hover td{background:var(--bg2)}
+.hist-table th{padding:6px 8px;text-align:left;font-size:9px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg1);white-space:nowrap}
+.hist-table td{padding:0;border-bottom:1px solid var(--border)}
+.hist-row.win .hist-cell-main{border-left:2px solid var(--green)}
+.hist-row.loss .hist-cell-main{border-left:2px solid var(--red)}
+.hist-row:hover .hist-cell-main,.hist-row:hover .hist-cell-sub{background:var(--bg2)}
+.hist-cell-main{display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:10px}
+.hist-cell-sub{display:flex;gap:16px;padding:3px 8px 5px 10px;font-size:9px;color:var(--text3);border-top:1px dashed rgba(255,255,255,.05)}
+.hist-sym{font-weight:700;color:#fff;min-width:52px}
+.hist-dir{font-size:8px;font-weight:700;padding:1px 4px;border-radius:2px}
+.hist-dir.long{background:#0d2e2a;color:var(--green);border:1px solid var(--green2)}
+.hist-dir.short{background:#2e0d0d;color:var(--red);border:1px solid var(--red2)}
+.hist-strat{font-size:8px;color:var(--text3);border:1px solid var(--border);border-radius:2px;padding:1px 4px}
+.hist-reason{font-size:8px;font-weight:700;padding:1px 5px;border-radius:2px;margin-left:auto}
+.hist-reason.tp{background:#0d2e2a;color:var(--green)}
+.hist-reason.sl{background:#2e0d0d;color:var(--red)}
+.hist-reason.manual{background:#1a1a2e;color:#7878b0;border:1px solid #3a3a60}
+.hist-reason.other{background:#1a1a1a;color:var(--text3)}
+.hist-pnl{font-weight:700;font-size:10px}
+.hist-pips{font-size:9px;color:var(--text3)}
 
 /* ─── Right Positions ────────────────────────────────────────── */
 #positions{grid-area:positions;display:flex;flex-direction:column;background:var(--bg1);border-left:1px solid var(--border);overflow:hidden}
@@ -218,7 +232,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   <div id="chart-container"><div id="lwchart"></div></div>
   <div id="history-panel">
     <table class="hist-table">
-      <thead><tr><th>Time</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th><th>Pips</th><th>P&amp;L</th></tr></thead>
+      <thead><tr><th>Trade</th><th>P&amp;L</th></tr></thead>
       <tbody id="hist-tbody"></tbody>
     </table>
   </div>
@@ -593,17 +607,37 @@ function renderHistory(history) {
   const tbody = document.getElementById('hist-tbody');
   tbody.innerHTML = '';
   (history||[]).slice().reverse().forEach(t => {
-    const isWin = (t.pnl_currency||0) >= 0;
+    const isWin   = (t.pnl_currency||0) >= 0;
+    const pnlSign = isWin ? '+' : '';
+    const pipSign = (t.pnl_pips||0) >= 0 ? '+' : '';
+    const dirCls  = t.direction === 'LONG' ? 'long' : 'short';
+    const strat   = t.signal_type || 'MANUAL';
+    const reason  = t.close_reason || '';
+    let reasonCls = 'other';
+    if (reason === 'TP HIT')    reasonCls = 'tp';
+    else if (reason === 'SL HIT' || reason === 'STOP OUT') reasonCls = 'sl';
+    else if (reason === 'MANUAL' || reason === 'BOT')      reasonCls = 'manual';
+
     const tr = document.createElement('tr');
-    tr.className = 'hist-row ' + (isWin?'win':'loss');
+    tr.className = 'hist-row ' + (isWin ? 'win' : 'loss');
     tr.innerHTML = `
-      <td class="dim">${fmtTime(t.close_time)}</td>
-      <td>${t.symbol}</td>
-      <td class="${t.direction==='LONG'?'p':'n'}">${t.direction}</td>
-      <td>${fmtP(t.entry_price)}</td>
-      <td>${fmtP(t.exit_price)}</td>
-      <td class="${(t.pnl_pips||0)>=0?'p':'n'}">${(t.pnl_pips||0)>=0?'+':''}${(t.pnl_pips||0).toFixed(1)}</td>
-      <td class="${isWin?'p':'n'}">${isWin?'+':''}$${fmt2(t.pnl_currency||0)}</td>`;
+      <td>
+        <div class="hist-cell-main">
+          <span class="hist-sym">${t.symbol}</span>
+          <span class="hist-dir ${dirCls}">${t.direction}</span>
+          <span class="hist-strat">${strat}</span>
+          ${reason ? `<span class="hist-reason ${reasonCls}">${reason}</span>` : ''}
+        </div>
+        <div class="hist-cell-sub">
+          <span>IN <b>${fmtTime(t.open_time)}</b> @ ${fmtP(t.entry_price)}</span>
+          <span>OUT <b>${fmtTime(t.close_time)}</b> @ ${fmtP(t.exit_price)}</span>
+          <span>Lot <b>${(t.lot_size||0).toFixed(2)}</b></span>
+          <span class="${isWin?'p':'n'}">${pipSign}${(t.pnl_pips||0).toFixed(1)}p</span>
+        </div>
+      </td>
+      <td style="text-align:right;padding:0 10px;white-space:nowrap">
+        <div class="hist-pnl ${isWin?'p':'n'}">${pnlSign}$${fmt2(t.pnl_currency||0)}</div>
+      </td>`;
     tbody.appendChild(tr);
   });
 }

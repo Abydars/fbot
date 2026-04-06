@@ -17,6 +17,30 @@ from core.mt5_client import MT5Client
 from core.state import SharedState, PositionState, TradeRecord, AccountState
 from core.strategy import PullbackStrategy, BreakoutStrategy, EntrySignal, _pip_size
 
+# MT5 deal reason codes → human label
+_DEAL_REASON = {
+    0: "MANUAL",    # client terminal
+    1: "MANUAL",    # mobile
+    2: "MANUAL",    # web
+    3: "BOT",       # EA / expert
+    4: "SL HIT",    # stop-loss triggered
+    5: "TP HIT",    # take-profit triggered
+    6: "STOP OUT",  # margin stop-out
+}
+
+
+def _infer_close_reason(deal: dict | None, pos: "PositionState") -> str:
+    """Determine why a position was closed."""
+    if deal and "reason" in deal:
+        return _DEAL_REASON.get(deal["reason"], "MANUAL")
+    # Fallback: compare exit price to known levels
+    exit_px = deal["price"] if deal else pos.current_price
+    if pos.tp_price and abs(exit_px - pos.tp_price) < abs(exit_px) * 0.0005:
+        return "TP HIT"
+    if pos.sl_price and abs(exit_px - pos.sl_price) < abs(exit_px) * 0.0005:
+        return "SL HIT"
+    return "MANUAL"
+
 
 class OrderManager:
     def __init__(self, client: MT5Client, state: SharedState):
@@ -63,9 +87,15 @@ class OrderManager:
                     open_time       TEXT,
                     close_time      TEXT,
                     status          TEXT,
-                    comment         TEXT
+                    comment         TEXT,
+                    close_reason    TEXT DEFAULT ''
                 )
             """)
+            # Migrate older DBs that don't have close_reason yet
+            try:
+                await db.execute("ALTER TABLE trades ADD COLUMN close_reason TEXT DEFAULT ''")
+            except Exception:
+                pass  # column already exists
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS scanner_log (
                     id              INTEGER PRIMARY KEY,
@@ -124,6 +154,7 @@ class OrderManager:
                     open_time=row["open_time"] or "",
                     close_time=row["close_time"] or "",
                     status=row["status"],
+                    close_reason=row["close_reason"] or "",
                 ))
 
             # 2. Today's win/loss counts
@@ -408,6 +439,8 @@ class OrderManager:
             else:
                 pnl_pips = (pos.entry_price - exit_price) / pip_sz
 
+        close_reason = _infer_close_reason(deal, pos)
+
         record = TradeRecord(
             ticket=ticket,
             symbol=pos.symbol,
@@ -423,6 +456,7 @@ class OrderManager:
             open_time=pos.open_time,
             close_time=close_time,
             status="CLOSED",
+            close_reason=close_reason,
         )
 
         await self.state.add_trade_history(record)
@@ -517,12 +551,13 @@ class OrderManager:
                 """
                 UPDATE trades SET
                     exit_price=?, pnl_pips=?, pnl_currency=?,
-                    close_time=?, status=?
+                    close_time=?, status=?, close_reason=?
                 WHERE ticket=?
                 """,
                 (
                     record.exit_price, record.pnl_pips, record.pnl_currency,
-                    record.close_time, record.status, record.ticket,
+                    record.close_time, record.status, record.close_reason,
+                    record.ticket,
                 ),
             )
             await db.commit()

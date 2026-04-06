@@ -473,6 +473,7 @@ class MT5Client:
                     "commission":   d.commission,
                     "time":         datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
                     "comment":      d.comment,
+                    "reason":       d.reason,   # MT5 deal reason code
                 })
         return result
 
