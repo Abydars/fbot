@@ -194,6 +194,14 @@ class MT5Client:
         """Return symbol name with the detected broker suffix applied."""
         return f"{symbol}{self._symbol_suffix}"
 
+    def _strip_suffix(self, symbol: str) -> str:
+        """Remove broker suffix to get the canonical watchlist symbol name.
+        MT5 returns positions/deals with the suffixed name (e.g. 'AUDUSDm').
+        Stripping it gives 'AUDUSD' so downstream calls don't double-apply."""
+        if self._symbol_suffix and symbol.endswith(self._symbol_suffix):
+            return symbol[: -len(self._symbol_suffix)]
+        return symbol
+
     async def _validate_symbols(self):
         """
         Auto-detect broker symbol suffix, ensure all watchlist symbols are
@@ -427,7 +435,7 @@ class MT5Client:
         for p in positions:
             result.append({
                 "ticket":       p.ticket,
-                "symbol":       p.symbol,
+                "symbol":       self._strip_suffix(p.symbol),   # canonical, no broker suffix
                 "type":         "LONG" if p.type == mt5.ORDER_TYPE_BUY else "SHORT",
                 "volume":       p.volume,
                 "open_price":   p.price_open,
@@ -456,7 +464,7 @@ class MT5Client:
                 result.append({
                     "ticket":       d.ticket,
                     "order":        d.order,
-                    "symbol":       d.symbol,
+                    "symbol":       self._strip_suffix(d.symbol),
                     "type":         "LONG" if d.type == mt5.DEAL_TYPE_BUY else "SHORT",
                     "volume":       d.volume,
                     "price":        d.price,

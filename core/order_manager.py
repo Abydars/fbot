@@ -232,25 +232,22 @@ class OrderManager:
                     comment=lp["comment"],
                 )
 
-            sym_info = await self.client.get_symbol_info(lp["symbol"])
-            if not sym_info:
-                continue
-
-            pip_sz = _pip_size(sym_info)
+            # Always update price and currency P&L — these don't need sym_info
             current = lp["current_price"]
             pos.current_price = current
+            pos.pnl_currency  = lp["profit"]
 
-            # P&L in pips
-            if pos.direction == "LONG":
-                pos.pnl_pips = (current - pos.entry_price) / pip_sz
-            else:
-                pos.pnl_pips = (pos.entry_price - current) / pip_sz
-
-            pos.pnl_currency = lp["profit"]
-
-            # Trailing stop logic
-            if config.TRAILING_STOP:
-                await self._apply_trailing_stop(pos, lp, sym_info)
+            # Pip-denominated P&L and trailing stop need sym_info
+            # lp["symbol"] is already canonical (no suffix) after _strip_suffix in client
+            sym_info = await self.client.get_symbol_info(lp["symbol"])
+            if sym_info:
+                pip_sz = _pip_size(sym_info)
+                if pos.direction == "LONG":
+                    pos.pnl_pips = (current - pos.entry_price) / pip_sz
+                else:
+                    pos.pnl_pips = (pos.entry_price - current) / pip_sz
+                if config.TRAILING_STOP:
+                    await self._apply_trailing_stop(pos, lp, sym_info)
 
             await self.state.update_position(pos)
 
