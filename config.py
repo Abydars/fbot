@@ -72,13 +72,7 @@ MIN_RR_RATIO = 2.0           # minimum reward-to-risk required to take a trade
 MAX_LOT_SIZE = 5.0           # hard cap per trade
 MAX_DAILY_DRAWDOWN_PCT = 5.0 # stop trading if daily drawdown exceeds this %
 
-# SL buffer multiplier (applied to ATR beyond swing high/low)
-SL_ATR_BUFFER = 0.3
-
-# Maximum SL distance as a multiple of ATR (caps runaway SL on volatile pairs)
-SL_ATR_CAP = 2.0
-
-# Minimum SL distance in pips (symbol-independent floor)
+# Minimum SL distance in pips (sanity floor — prevents stops too close to entry)
 MIN_SL_PIPS = 10.0
 
 # Breakout entry — stop-limit offset beyond breakout level (pips)

@@ -58,7 +58,6 @@ CONFIG_SCHEMA = {
             "MAX_LOT_SIZE":            {"type": "number", "label": "Max Lot Size",            "min":0.01,"max":100,"step":0.01},
             "MAX_DAILY_DRAWDOWN_PCT":  {"type": "number", "label": "Max Daily Drawdown (%)", "min":0.5, "max":50, "step":0.5},
             "MIN_SL_PIPS":             {"type": "number", "label": "Min SL (pips)",          "min":1,   "max":100},
-            "SL_ATR_CAP":              {"type": "number", "label": "Max SL (× ATR)",          "min":0.5, "max":10, "step":0.5},
             "DEFAULT_MAX_SPREAD":      {"type": "number", "label": "Max Spread Default (pips)","min":0.5,"max":20,"step":0.5},
         }
     },
