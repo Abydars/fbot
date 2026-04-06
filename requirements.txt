@@ -1,11 +1,19 @@
-MetaTrader5
+# Core async framework
 fastapi
 uvicorn[standard]
 websockets
+
+# Data / indicators
 pandas
-pandas-ta
 numpy
+
+# Database
 aiosqlite
 sqlalchemy
+
+# Utilities
 loguru
 python-dotenv
+
+# MetaTrader5 — Windows only (skipped automatically on Linux/Mac)
+MetaTrader5; sys_platform == "win32"
