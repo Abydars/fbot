@@ -79,6 +79,23 @@ def create_app(state: SharedState) -> FastAPI:
     async def api_history():
         return JSONResponse([t.to_dict() for t in state.trade_history[-100:]])
 
+    @app.get("/api/ohlcv/{symbol}")
+    async def api_ohlcv(symbol: str, tf: str = "M15", count: int = 200):
+        """Fetch OHLCV candles for the chart. Used by the UI chart panel."""
+        from core.mt5_client import MT5Client as _MT5
+        # Grab the client from order manager if available
+        om = _get_om()
+        client = getattr(om, "client", None) if om else None
+        if client is None:
+            raise HTTPException(status_code=503, detail="MT5 client not ready")
+        df = await client.get_ohlcv(symbol, tf, count)
+        if df is None:
+            raise HTTPException(status_code=404, detail=f"No data for {symbol} {tf}")
+        # Return as list of {time, open, high, low, close, volume}
+        df = df.reset_index()
+        df["time"] = df["time"].astype("int64") // 10**9   # Unix seconds
+        return JSONResponse(df[["time","open","high","low","close","volume"]].to_dict("records"))
+
     @app.post("/api/close/{ticket}")
     async def api_close(ticket: int):
         om = _get_om()
