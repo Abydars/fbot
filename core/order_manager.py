@@ -230,7 +230,7 @@ class OrderManager:
                 # Log to scanner_log
                 await self._log_scanner(result, "SIGNAL")
             else:
-                if result.score() >= config.SCANNER_MIN_SCORE:
+                if result.score() >= 65:
                     await self._log_scanner(result, "WATCHED")
 
     # ------------------------------------------------------------------
