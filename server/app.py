@@ -26,54 +26,22 @@ CONFIG_SCHEMA = {
     "connection": {
         "label": "MT5 Connection",
         "fields": {
-            "EXNESS_ACCOUNT":  {"type": "number", "label": "Account Number"},
-            "EXNESS_PASSWORD": {"type": "password","label": "Password"},
-            "EXNESS_SERVER":   {"type": "text",    "label": "Server Name"},
-            "TRADING_MODE":    {"type": "select",  "label": "Mode", "options": ["demo","live"]},
-            "SYMBOL_SUFFIX":   {"type": "text",    "label": "Symbol Suffix (auto if blank)"},
-        }
-    },
-    "scanner": {
-        "label": "Scanner",
-        "fields": {
-            "SCANNER_INTERVAL":   {"type": "number", "label": "Scan Interval (s)",    "min":5,  "max":300},
-            "SCANNER_MIN_SCORE":  {"type": "number", "label": "Min Score to Alert",   "min":0,  "max":100},
-            "PRIMARY_TIMEFRAME":  {"type": "select", "label": "Primary Timeframe",    "options":["M1","M5","M15","M30","H1","H4","D1"]},
-            "TREND_TIMEFRAME":    {"type": "select", "label": "Trend Timeframe",      "options":["M5","M15","M30","H1","H4","D1"]},
-            "EMA_FAST":           {"type": "number", "label": "EMA Fast Period",      "min":2,  "max":100},
-            "EMA_SLOW":           {"type": "number", "label": "EMA Slow Period",      "min":5,  "max":200},
-            "RSI_PERIOD":         {"type": "number", "label": "RSI Period",           "min":2,  "max":50},
-            "ATR_PERIOD":         {"type": "number", "label": "ATR Period",           "min":2,  "max":50},
+            "EXNESS_ACCOUNT":  {"type": "number",   "label": "Account Number"},
+            "EXNESS_PASSWORD": {"type": "password", "label": "Password"},
+            "EXNESS_SERVER":   {"type": "text",     "label": "Server Name"},
+            "TRADING_MODE":    {"type": "select",   "label": "Mode", "options": ["demo", "live"]},
+            "SYMBOL_SUFFIX":   {"type": "text",     "label": "Symbol Suffix (leave blank for auto-detect)"},
         }
     },
     "risk": {
         "label": "Risk Management",
         "fields": {
-            "RISK_PER_TRADE":          {"type": "number", "label": "Risk Per Trade (%)",      "min":0.1, "max":10,  "step":0.1},
-            "MAX_OPEN_TRADES":         {"type": "number", "label": "Max Open Trades",         "min":1,   "max":20},
-            "MAX_TRADES_PER_SYMBOL":   {"type": "number", "label": "Max Trades Per Symbol",   "min":1,   "max":5},
-            "MIN_RR_RATIO":            {"type": "number", "label": "Min R:R Ratio",           "min":0.5, "max":10, "step":0.5},
-            "BREAKEVEN_AT_RR":         {"type": "number", "label": "Breakeven at R:R",        "min":0.5, "max":5,  "step":0.5},
+            "RISK_PER_TRADE":          {"type": "number", "label": "Risk Per Trade (%)",     "min": 0.1, "max": 10,  "step": 0.1},
+            "MAX_OPEN_TRADES":         {"type": "number", "label": "Max Concurrent Trades",  "min": 1,   "max": 20},
+            "MAX_LOT_SIZE":            {"type": "number", "label": "Max Lot Size",           "min": 0.01,"max": 100, "step": 0.01},
+            "MAX_DAILY_DRAWDOWN_PCT":  {"type": "number", "label": "Max Daily Drawdown (%)", "min": 0.5, "max": 50,  "step": 0.5},
             "TRAILING_STOP":           {"type": "bool",   "label": "Trailing Stop"},
-            "MAX_LOT_SIZE":            {"type": "number", "label": "Max Lot Size",            "min":0.01,"max":100,"step":0.01},
-            "MAX_DAILY_DRAWDOWN_PCT":  {"type": "number", "label": "Max Daily Drawdown (%)", "min":0.5, "max":50, "step":0.5},
-            "MIN_SL_PIPS":             {"type": "number", "label": "Min SL (pips)",          "min":1,   "max":100},
-            "DEFAULT_MAX_SPREAD":      {"type": "number", "label": "Max Spread Default (pips)","min":0.5,"max":20,"step":0.5},
-        }
-    },
-    "session": {
-        "label": "Session Filter",
-        "fields": {
-            "LONDON_OPEN_HOUR":  {"type": "number", "label": "London Open (UTC hour)",  "min":0, "max":23},
-            "LONDON_CLOSE_HOUR": {"type": "number", "label": "London Close (UTC hour)", "min":0, "max":23},
-            "NY_OPEN_HOUR":      {"type": "number", "label": "NY Open (UTC hour)",      "min":0, "max":23},
-            "NY_CLOSE_HOUR":     {"type": "number", "label": "NY Close (UTC hour)",     "min":0, "max":23},
-        }
-    },
-    "symbols": {
-        "label": "Watchlist",
-        "fields": {
-            "SYMBOLS_WATCHLIST": {"type": "tags", "label": "Symbols (one per line)"},
+            "BREAKEVEN_AT_RR":         {"type": "number", "label": "Move to Breakeven at R:R","min": 0.5, "max": 5,   "step": 0.5},
         }
     },
 }

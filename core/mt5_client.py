@@ -186,7 +186,7 @@ class MT5Client:
             sample = [s.name for s in all_syms[:30]]
             logger.warning(f"  First 30 symbols on server: {sample}")
             logger.warning(
-                "  Update SYMBOLS_WATCHLIST in config.py to match the exact names above."
+                "  Set SYMBOL_SUFFIX in .env to match the suffix used above (e.g. SYMBOL_SUFFIX=m)."
             )
         return ""
 
@@ -204,41 +204,29 @@ class MT5Client:
 
     async def _validate_symbols(self):
         """
-        Auto-detect broker symbol suffix, ensure all watchlist symbols are
-        visible in Market Watch, and trigger an initial history download.
+        Auto-detect broker symbol suffix, then preload history for all
+        visible Market Watch symbols so the first scan cycle has data.
         """
         self._symbol_suffix = await self._detect_symbol_suffix()
 
-        missing = []
-        for sym in config.SYMBOLS_WATCHLIST:
-            actual = self._apply_suffix(sym)
-            info = await asyncio.to_thread(mt5.symbol_info, actual)
-            if info is None:
-                missing.append(sym)
-                continue
-            if not info.visible:
-                await asyncio.to_thread(mt5.symbol_select, actual, True)
-                logger.debug(f"Added {actual} to Market Watch")
-
-        if missing:
+        # Collect all visible + tradeable symbols from Market Watch
+        all_syms = await asyncio.to_thread(mt5.symbols_get)
+        tradeable = [
+            s.name for s in (all_syms or [])
+            if s.visible and s.trade_mode == 4
+        ]
+        if not tradeable:
             logger.warning(
-                f"Symbols not found on server (will be skipped): {missing}. "
-                f"Current suffix='{self._symbol_suffix}'"
-            )
-
-        available = [s for s in config.SYMBOLS_WATCHLIST if s not in missing]
-        if not available:
-            logger.error(
-                "No symbols available — check SYMBOLS_WATCHLIST in config.py "
-                "or set SYMBOL_SUFFIX in .env"
+                "No tradeable symbols found in MT5 Market Watch. "
+                "Add symbols to Market Watch in your MT5 terminal."
             )
             return
 
         logger.info(
-            f"Preloading historical data for {len(available)} symbols "
-            f"(this may take 5–15 s)..."
+            f"Found {len(tradeable)} tradeable symbols in Market Watch. "
+            f"Preloading historical data (this may take 10–30 s)..."
         )
-        preload_tasks = [self._preload_symbol(self._apply_suffix(sym)) for sym in available]
+        preload_tasks = [self._preload_symbol(sym) for sym in tradeable]
         await asyncio.gather(*preload_tasks)
         logger.info("Historical data preload complete.")
 
@@ -267,11 +255,10 @@ class MT5Client:
 
     async def _check_data_access(self):
         """
-        Quick sanity check: try to fetch 5 H1 bars for the first watchlist symbol.
-        If this fails, log a single clear warning instead of spamming per-symbol
-        errors during every scanner cycle.
+        Quick sanity check: try to fetch 5 H1 bars for EURUSD (with suffix).
+        If this fails, log a single clear warning.
         """
-        probe = config.SYMBOLS_WATCHLIST[0]
+        probe = self._apply_suffix("EURUSD")
         tf = TIMEFRAMES.get("H1")
         rates = await asyncio.to_thread(mt5.copy_rates_from_pos, probe, tf, 0, 5)
         if rates is None or len(rates) == 0:
@@ -403,6 +390,26 @@ class MT5Client:
             "last": tick.last,
             "time": datetime.fromtimestamp(tick.time, tz=timezone.utc),
         }
+
+    async def get_tradeable_symbols(self) -> list[str]:
+        """
+        Return canonical names of all visible, fully-tradeable symbols from
+        the MT5 Market Watch.  The user controls this list directly in MT5 by
+        adding/removing symbols from their Market Watch window.
+        """
+        symbols = await asyncio.to_thread(mt5.symbols_get)
+        if not symbols:
+            return []
+        result = []
+        for s in symbols:
+            if not s.visible:
+                continue
+            # SYMBOL_TRADE_MODE_FULL = 4 — skip suspended / close-only symbols
+            if s.trade_mode != 4:
+                continue
+            result.append(self._strip_suffix(s.name))
+        # Deduplicate (suffix stripping can theoretically collide)
+        return list(dict.fromkeys(result))
 
     async def get_symbol_info(self, symbol: str) -> Optional[dict]:
         """Return symbol metadata needed for lot sizing and SL calculation."""

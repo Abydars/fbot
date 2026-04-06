@@ -1,6 +1,9 @@
 """
-config.py — All settings, credentials, and mode toggle for Exness Forex Bot.
-Edit this file before running. Never commit real credentials to version control.
+config.py — Bot settings.
+
+Credentials come from .env (never commit real credentials).
+Risk/runtime settings are persisted to bot_config.json and editable via the UI.
+Everything else is an internal constant the bot manages itself.
 """
 
 import os
@@ -9,110 +12,52 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# MT5 / Exness credentials
+# MT5 / Exness credentials  (set in .env)
 # ---------------------------------------------------------------------------
-EXNESS_ACCOUNT = int(os.getenv("EXNESS_ACCOUNT", "123456789"))
+EXNESS_ACCOUNT  = int(os.getenv("EXNESS_ACCOUNT", "123456789"))
 EXNESS_PASSWORD = os.getenv("EXNESS_PASSWORD", "")
-EXNESS_SERVER = os.getenv("EXNESS_SERVER", "Exness-MT5Trial")
-
-# "demo" or "live" — used as an informational label in the UI
-TRADING_MODE = os.getenv("TRADING_MODE", "demo")
+EXNESS_SERVER   = os.getenv("EXNESS_SERVER", "Exness-MT5Trial")
+TRADING_MODE    = os.getenv("TRADING_MODE", "demo")
 
 # Symbol suffix used by this broker (auto-detected on connect).
 # Override in .env only if auto-detection fails, e.g. SYMBOL_SUFFIX=m
-# Leave empty for auto-detection.
-SYMBOL_SUFFIX = os.getenv("SYMBOL_SUFFIX", "")
+SYMBOL_SUFFIX   = os.getenv("SYMBOL_SUFFIX", "")
 
 # ---------------------------------------------------------------------------
-# Symbols to scan (Exness forex + metals + crypto CFDs)
+# Risk management  (editable via UI → saved to bot_config.json)
 # ---------------------------------------------------------------------------
-SYMBOLS_WATCHLIST = [
-    "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-    "AUDUSD", "NZDUSD", "USDCAD",
-    "GBPJPY", "EURJPY", "EURGBP",
-    "XAUUSD",   # Gold
-    "XAGUSD",   # Silver
-    "BTCUSD",   # Crypto CFD
-    "ETHUSD",
-]
+RISK_PER_TRADE         = 1.0   # % of balance risked per trade
+MAX_OPEN_TRADES        = 4     # max concurrent positions
+MAX_LOT_SIZE           = 5.0   # hard lot cap per trade
+MAX_DAILY_DRAWDOWN_PCT = 5.0   # pause trading if daily drawdown exceeds this %
+TRAILING_STOP          = True  # enable trailing stop
+BREAKEVEN_AT_RR        = 1.0   # move SL to breakeven once R:R reaches this value
 
 # ---------------------------------------------------------------------------
-# Scanner settings
+# Internal constants  (not user-configurable)
 # ---------------------------------------------------------------------------
-SCANNER_INTERVAL = 20        # seconds between scanner runs
-SCANNER_MIN_SCORE = 65       # minimum score to mark as opportunity
+SCANNER_INTERVAL          = 20      # seconds between full scan cycles
+MIN_SL_PIPS               = 10.0   # minimum SL distance (sanity floor)
+BREAKOUT_ENTRY_OFFSET_PIPS = 2.0   # pips beyond breakout level for stop-limit entry
 
 # ---------------------------------------------------------------------------
-# Strategy / indicator settings
+# Server
 # ---------------------------------------------------------------------------
-PRIMARY_TIMEFRAME = "M15"
-TREND_TIMEFRAME = "H1"
-EMA_FAST = 20
-EMA_SLOW = 50
-RSI_PERIOD = 14
-ATR_PERIOD = 14
-
-# Per-symbol max spread in pips — symbols not listed use DEFAULT_MAX_SPREAD
-SYMBOL_MAX_SPREAD = {
-    "XAUUSD": 5.0,
-    "BTCUSD": 50.0,
-    "ETHUSD": 5.0,
-}
-DEFAULT_MAX_SPREAD = 3.0     # pips
+SERVER_HOST            = "0.0.0.0"
+SERVER_PORT            = 8080
+UI_BROADCAST_INTERVAL  = 0.5   # seconds between WebSocket broadcasts
 
 # ---------------------------------------------------------------------------
-# Risk management
+# Database / logging
 # ---------------------------------------------------------------------------
-RISK_PER_TRADE = 1.0         # % of account balance per trade
-MAX_OPEN_TRADES = 4
-MAX_TRADES_PER_SYMBOL = 1
-TRAILING_STOP = True
-BREAKEVEN_AT_RR = 1.0        # move SL to breakeven at 1:1 R:R
-MIN_RR_RATIO = 2.0           # minimum reward-to-risk required to take a trade
-MAX_LOT_SIZE = 5.0           # hard cap per trade
-MAX_DAILY_DRAWDOWN_PCT = 5.0 # stop trading if daily drawdown exceeds this %
-
-# Minimum SL distance in pips (sanity floor — prevents stops too close to entry)
-MIN_SL_PIPS = 10.0
-
-# Breakout entry — stop-limit offset beyond breakout level (pips)
-BREAKOUT_ENTRY_OFFSET_PIPS = 2.0
-
-# ---------------------------------------------------------------------------
-# Session filter (UTC hours)
-# ---------------------------------------------------------------------------
-LONDON_OPEN_HOUR = 8
-LONDON_CLOSE_HOUR = 17
-NY_OPEN_HOUR = 13
-NY_CLOSE_HOUR = 22
-
-# Symbols allowed during Asian / off-hours session
-ASIAN_SESSION_SYMBOLS = {"USDJPY", "AUDUSD", "NZDUSD", "XAUUSD"}
-
-# ---------------------------------------------------------------------------
-# Server / API
-# ---------------------------------------------------------------------------
-SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 8080
-UI_BROADCAST_INTERVAL = 0.5  # seconds between WebSocket broadcasts
-
-# ---------------------------------------------------------------------------
-# Database
-# ---------------------------------------------------------------------------
-DB_PATH = "trades.db"
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-LOG_LEVEL = "INFO"
-LOG_DIR = "logs"
-
-# ---------------------------------------------------------------------------
-# Runtime config file (non-credential settings, editable via UI)
-# ---------------------------------------------------------------------------
+DB_PATH          = "trades.db"
 CONFIG_JSON_PATH = "bot_config.json"
+LOG_LEVEL        = "INFO"
+LOG_DIR          = "logs"
 
-# Apply any previously-saved runtime config overrides
+# ---------------------------------------------------------------------------
+# Runtime config overrides from bot_config.json
+# ---------------------------------------------------------------------------
 import json as _json
 from pathlib import Path as _Path
 _config_json = _Path(__file__).parent / CONFIG_JSON_PATH

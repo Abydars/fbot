@@ -1,14 +1,13 @@
 """
 core/strategy.py — Pullback and Breakout entry strategy engines.
 
-SL/TP placement is driven entirely by market structure (pivot highs/lows),
-not by fixed config multipliers. The bot finds the nearest swing level beyond
-the entry to place SL, and the next significant opposing level for TP.
+SL/TP placement is driven entirely by market structure (pivot highs/lows).
+No session filter — the bot trades whenever a valid setup exists.
+Spread is checked adaptively: skip if spread > 20 % of ATR.
 """
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -41,21 +40,6 @@ class EntrySignal:
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-def _is_trading_session(symbol: str) -> bool:
-    """Return True if we are inside an allowed trading session."""
-    now = datetime.now(timezone.utc)
-    hour = now.hour
-
-    in_london = config.LONDON_OPEN_HOUR <= hour < config.LONDON_CLOSE_HOUR
-    in_ny     = config.NY_OPEN_HOUR     <= hour < config.NY_CLOSE_HOUR
-    in_session = in_london or in_ny
-
-    if not in_session and symbol in config.ASIAN_SESSION_SYMBOLS:
-        return True   # Gold/JPY pairs allowed outside main sessions
-
-    return in_session
-
 
 def _pip_size(sym_info: dict) -> float:
     """Return the pip size for a symbol (0.0001 for most FX, 0.01 for JPY pairs)."""
@@ -223,27 +207,23 @@ class PullbackStrategy:
         if self.state.open_position_count() >= config.MAX_OPEN_TRADES:
             logger.debug("PB skip: max open trades reached")
             return None
-        if not _is_trading_session(symbol):
-            logger.debug(f"PB skip {symbol}: outside trading session")
-            return None
         if not _check_drawdown(self.state):
             logger.warning("PB skip: daily drawdown limit reached")
             return None
 
         sym_info = await self.client.get_symbol_info(symbol)
         tick     = await self.client.get_tick(symbol)
-        df       = await self.client.get_ohlcv(symbol, config.PRIMARY_TIMEFRAME, 150)
+        df       = await self.client.get_ohlcv(symbol, "M15", 150)
 
         if not sym_info or not tick or df is None or len(df) < 20:
             return None
 
         pip_sz = _pip_size(sym_info)
 
-        # Spread check
-        spread_pips = scanner_result.spread
-        max_spread  = config.SYMBOL_MAX_SPREAD.get(symbol, config.DEFAULT_MAX_SPREAD)
-        if spread_pips > max_spread:
-            logger.debug(f"PB skip {symbol}: spread {spread_pips:.1f}p > {max_spread}p")
+        # Adaptive spread check: skip if spread > 20 % of ATR
+        atr_pips = scanner_result.atr / pip_sz if pip_sz > 0 else 0
+        if atr_pips > 0 and scanner_result.spread > atr_pips * 0.20:
+            logger.debug(f"PB skip {symbol}: spread {scanner_result.spread:.1f}p > 20% ATR")
             return None
 
         entry = tick["ask"] if direction == "LONG" else tick["bid"]
@@ -316,23 +296,19 @@ class BreakoutStrategy:
             return None
         if self.state.open_position_count() >= config.MAX_OPEN_TRADES:
             return None
-        if not _is_trading_session(symbol):
-            return None
         if not _check_drawdown(self.state):
             return None
 
         sym_info = await self.client.get_symbol_info(symbol)
         tick     = await self.client.get_tick(symbol)
-        df       = await self.client.get_ohlcv(symbol, config.PRIMARY_TIMEFRAME, 150)
+        df       = await self.client.get_ohlcv(symbol, "M15", 150)
 
         if not sym_info or not tick or df is None or len(df) < 50:
             return None
 
-        pip_sz = _pip_size(sym_info)
-
-        spread_pips = scanner_result.spread
-        max_spread  = config.SYMBOL_MAX_SPREAD.get(symbol, config.DEFAULT_MAX_SPREAD)
-        if spread_pips > max_spread:
+        pip_sz   = _pip_size(sym_info)
+        atr_pips = scanner_result.atr / pip_sz if pip_sz > 0 else 0
+        if atr_pips > 0 and scanner_result.spread > atr_pips * 0.20:
             return None
 
         # Identify the consolidation zone (last 8 completed bars)
