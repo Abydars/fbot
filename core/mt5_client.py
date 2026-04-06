@@ -137,21 +137,50 @@ class MT5Client:
             logger.info("MT5 disconnected.")
 
     async def _validate_symbols(self):
-        """Check which watchlist symbols are available on the server."""
+        """
+        Ensure all watchlist symbols are visible in Market Watch and trigger
+        an initial history download so data is ready for the first scanner run.
+        """
         missing = []
         for sym in config.SYMBOLS_WATCHLIST:
             info = await asyncio.to_thread(mt5.symbol_info, sym)
             if info is None:
                 missing.append(sym)
-            else:
-                # Ensure the symbol is visible in Market Watch
-                if not info.visible:
-                    await asyncio.to_thread(mt5.symbol_select, sym, True)
+                continue
+            # Add to Market Watch if not already visible
+            if not info.visible:
+                await asyncio.to_thread(mt5.symbol_select, sym, True)
+                logger.debug(f"Added {sym} to Market Watch")
 
         if missing:
-            logger.warning(f"Symbols not found on server: {missing}")
-        else:
-            logger.info(f"All {len(config.SYMBOLS_WATCHLIST)} watchlist symbols verified.")
+            logger.warning(f"Symbols not found on server (will be skipped): {missing}")
+
+        # Trigger history preload for all available symbols.
+        # MT5 fetches candle data from the broker asynchronously — calling
+        # copy_rates_from_pos once primes the cache; subsequent calls succeed.
+        logger.info("Preloading historical data from broker (this may take 5–15 s)...")
+        preload_tasks = [
+            self._preload_symbol(sym)
+            for sym in config.SYMBOLS_WATCHLIST
+            if sym not in missing
+        ]
+        await asyncio.gather(*preload_tasks)
+        logger.info("Historical data preload complete.")
+
+    async def _preload_symbol(self, symbol: str, retries: int = 6, delay: float = 3.0):
+        """Request a small candle slice to trigger MT5 broker data download."""
+        tf = TIMEFRAMES.get("H1")
+        for attempt in range(1, retries + 1):
+            rates = await asyncio.to_thread(
+                mt5.copy_rates_from_pos, symbol, tf, 0, 10
+            )
+            if rates is not None and len(rates) > 0:
+                logger.debug(f"Preload OK: {symbol}")
+                return
+            err = await asyncio.to_thread(mt5.last_error)
+            logger.debug(f"Preload {symbol} attempt {attempt}/{retries}: {err}")
+            await asyncio.sleep(delay)
+        logger.warning(f"Could not preload history for {symbol} — will retry during scan.")
 
     # ------------------------------------------------------------------
     # Account info
@@ -194,26 +223,41 @@ class MT5Client:
         symbol: str,
         timeframe: str,
         count: int = 200,
+        retries: int = 3,
+        retry_delay: float = 2.0,
     ) -> Optional[pd.DataFrame]:
-        """Fetch OHLCV candles and return as a pandas DataFrame."""
+        """
+        Fetch OHLCV candles and return as a pandas DataFrame.
+        Retries automatically when MT5 is still downloading history from broker.
+        """
         tf = TIMEFRAMES.get(timeframe)
         if tf is None:
             logger.error(f"Unknown timeframe: {timeframe}")
             return None
 
-        rates = await asyncio.to_thread(
-            mt5.copy_rates_from_pos, symbol, tf, 0, count
-        )
-        if rates is None or len(rates) == 0:
-            logger.warning(f"No OHLCV data for {symbol} {timeframe}")
-            return None
+        for attempt in range(1, retries + 1):
+            rates = await asyncio.to_thread(
+                mt5.copy_rates_from_pos, symbol, tf, 0, count
+            )
+            if rates is not None and len(rates) > 0:
+                df = pd.DataFrame(rates)
+                df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+                df.set_index("time", inplace=True)
+                df.rename(columns={"tick_volume": "volume"}, inplace=True)
+                return df[["open", "high", "low", "close", "volume"]].copy()
 
-        df = pd.DataFrame(rates)
-        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
-        df.set_index("time", inplace=True)
-        df.rename(columns={"tick_volume": "volume"}, inplace=True)
-        # Keep standard columns
-        return df[["open", "high", "low", "close", "volume"]].copy()
+            err = await asyncio.to_thread(mt5.last_error)
+            if attempt < retries:
+                logger.debug(
+                    f"OHLCV retry {attempt}/{retries} {symbol} {timeframe} — MT5 error: {err}"
+                )
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.warning(
+                    f"No OHLCV data for {symbol} {timeframe} after {retries} attempts "
+                    f"(MT5 error: {err}). Is the symbol in Market Watch?"
+                )
+        return None
 
     async def get_tick(self, symbol: str) -> Optional[dict]:
         """Return latest bid/ask for a symbol."""
