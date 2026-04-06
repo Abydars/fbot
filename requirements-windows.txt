@@ -1,0 +1,3 @@
+# Windows-only requirements (includes everything in requirements.txt plus MT5)
+-r requirements.txt
+MetaTrader5
