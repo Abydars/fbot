@@ -313,6 +313,7 @@ class Scanner:
             atr=round(atr_val, 6),
             fib_level=fib_level,
             last_updated=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            last_bar_close=float(df_m15["close"].iloc[-2]),  # last COMPLETED bar close
         )
 
         await self.state.update_scanner(result)

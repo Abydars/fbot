@@ -372,13 +372,14 @@ class OrderManager:
     async def _apply_trailing_stop(
         self, pos: PositionState, lp: dict, sym_info: dict
     ):
-        pip_sz = _pip_size(sym_info)
+        pip_sz  = _pip_size(sym_info)
         current = pos.current_price
         entry   = pos.entry_price
         sl      = pos.sl_price
         tp      = pos.tp_price
-        atr     = self.state.scanner_results.get(pos.symbol)
-        atr_val = atr.atr if atr else pip_sz * 15
+
+        scanner = self.state.scanner_results.get(pos.symbol)
+        atr_val = scanner.atr if scanner else pip_sz * 15
 
         sl_distance = abs(entry - sl)
         rr_current  = pos.pnl_pips / (sl_distance / pip_sz) if sl_distance > 0 else 0
@@ -394,16 +395,22 @@ class OrderManager:
             pos.breakeven_done = True
             logger.info(f"Breakeven set for ticket={pos.ticket} {pos.symbol}")
 
-        # Trail by 0.5 ATR once at 1.5:1 RR
+        # Trailing stop: advance best_price using the last CLOSED candle's close,
+        # not the live tick.  This prevents spike wicks (e.g. a flash pump wick
+        # to 0.315 that closes at 0.296) from locking in an unreachable trail arm.
+        # Genuine trend moves close progressively higher — spikes don't.
         if rr_current >= 1.5:
+            # Use confirmed closed-bar close when available, fall back to tick
+            confirmed = scanner.last_bar_close if (scanner and scanner.last_bar_close > 0) else current
+
             if pos.direction == "LONG":
-                pos.best_price = max(pos.best_price, current)
-                trail_sl = pos.best_price - atr_val * 1.0
-                new_sl = max(new_sl, trail_sl)
+                pos.best_price = max(pos.best_price, confirmed)
+                trail_sl       = pos.best_price - atr_val * 1.0
+                new_sl         = max(new_sl, trail_sl)
             else:
-                pos.best_price = min(pos.best_price, current)
-                trail_sl = pos.best_price + atr_val * 1.0
-                new_sl = min(new_sl, trail_sl)
+                pos.best_price = min(pos.best_price, confirmed)
+                trail_sl       = pos.best_price + atr_val * 1.0
+                new_sl         = min(new_sl, trail_sl)
 
         # Only modify if SL actually moved in profit direction
         if pos.direction == "LONG" and new_sl > sl + pip_sz:

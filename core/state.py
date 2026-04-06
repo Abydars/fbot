@@ -25,6 +25,7 @@ class ScannerResult:
     atr: float = 0.0
     fib_level: str = ""
     last_updated: str = ""
+    last_bar_close: float = 0.0   # close of last COMPLETED candle (spike-filtered)
 
     def score(self) -> int:
         return max(self.pullback_score, self.breakout_score)
