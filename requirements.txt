@@ -1,0 +1,11 @@
+MetaTrader5
+fastapi
+uvicorn[standard]
+websockets
+pandas
+pandas-ta
+numpy
+aiosqlite
+sqlalchemy
+loguru
+python-dotenv
