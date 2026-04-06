@@ -13,12 +13,30 @@ from typing import Optional
 import pandas as pd
 from loguru import logger
 
+mt5 = None
+MT5_AVAILABLE = False
+
 try:
-    import MetaTrader5 as mt5
+    import MetaTrader5 as mt5  # type: ignore
     MT5_AVAILABLE = True
+    logger.info("Using MetaTrader5 (native Windows package).")
 except ImportError:
-    MT5_AVAILABLE = False
-    logger.warning("MetaTrader5 package not installed or not available on this platform.")
+    pass
+
+if not MT5_AVAILABLE:
+    try:
+        from mt5linux import MetaTrader5 as mt5  # type: ignore
+        MT5_AVAILABLE = True
+        logger.info("Using mt5linux (Wine/socket bridge for Mac/Linux).")
+    except ImportError:
+        pass
+
+if not MT5_AVAILABLE:
+    logger.warning(
+        "No MT5 package found. "
+        "Windows: pip install MetaTrader5 | "
+        "Mac/Linux: pip install mt5linux  (requires Wine + MT5 server — see README)"
+    )
 
 import config
 
@@ -52,8 +70,10 @@ class MT5Client:
         """Initialize connection to MT5 terminal and verify account."""
         if not MT5_AVAILABLE:
             raise RuntimeError(
-                "MetaTrader5 package is not installed. "
-                "Run: pip install MetaTrader5  (Windows only)"
+                "No MT5 package available.\n"
+                "  Windows : pip install MetaTrader5\n"
+                "  Mac/Linux: pip install mt5linux  "
+                "(then start the mt5linux server inside Wine — see README)"
             )
 
         logger.info(

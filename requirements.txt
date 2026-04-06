@@ -15,6 +15,7 @@ sqlalchemy
 loguru
 python-dotenv
 
-# MetaTrader5 is Windows-only.
-# On Windows run: pip install -r requirements-windows.txt
-# The bot handles a missing MT5 package gracefully at runtime.
+# MT5 connectivity — install ONE depending on your OS:
+#   Windows : pip install -r requirements-windows.txt
+#   Mac/Linux: pip install mt5linux  (requires Wine + MT5 — see README)
+mt5linux
