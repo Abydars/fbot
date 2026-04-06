@@ -138,34 +138,87 @@ class MT5Client:
             self._connected = False
             logger.info("MT5 disconnected.")
 
+    # Symbol suffix detected at connect time (e.g. "" | "m" | ".s" | "+")
+    _symbol_suffix: str = ""
+
+    async def _detect_symbol_suffix(self) -> str:
+        """
+        Exness (and some other brokers) append a suffix to symbol names.
+        Try common suffixes against EURUSD to find the one this server uses.
+        Returns the suffix string (empty string = plain names).
+        """
+        # Allow manual override from .env / config.py
+        if config.SYMBOL_SUFFIX != "":
+            logger.info(f"Using forced SYMBOL_SUFFIX='{config.SYMBOL_SUFFIX}' from config")
+            return config.SYMBOL_SUFFIX
+
+        candidates = ["", "m", "+", ".s", ".r", "pro", "ecn", ".e"]
+        for suffix in candidates:
+            probe = f"EURUSD{suffix}"
+            info = await asyncio.to_thread(mt5.symbol_info, probe)
+            if info is not None:
+                if suffix:
+                    logger.info(
+                        f"Symbol suffix detected: '{suffix}'  "
+                        f"(e.g. EURUSD → EURUSD{suffix}). "
+                        f"Update SYMBOL_SUFFIX in .env if needed."
+                    )
+                else:
+                    logger.info("Symbol names use no suffix (plain EURUSD etc.)")
+                return suffix
+
+        # Nothing matched — dump available symbols to help diagnose
+        logger.warning("Could not detect symbol suffix. Dumping available symbols:")
+        all_syms = await asyncio.to_thread(mt5.symbols_get)
+        if all_syms:
+            sample = [s.name for s in all_syms[:30]]
+            logger.warning(f"  First 30 symbols on server: {sample}")
+            logger.warning(
+                "  Update SYMBOLS_WATCHLIST in config.py to match the exact names above."
+            )
+        return ""
+
+    def _apply_suffix(self, symbol: str) -> str:
+        """Return symbol name with the detected broker suffix applied."""
+        return f"{symbol}{self._symbol_suffix}"
+
     async def _validate_symbols(self):
         """
-        Ensure all watchlist symbols are visible in Market Watch and trigger
-        an initial history download so data is ready for the first scanner run.
+        Auto-detect broker symbol suffix, ensure all watchlist symbols are
+        visible in Market Watch, and trigger an initial history download.
         """
+        self._symbol_suffix = await self._detect_symbol_suffix()
+
         missing = []
         for sym in config.SYMBOLS_WATCHLIST:
-            info = await asyncio.to_thread(mt5.symbol_info, sym)
+            actual = self._apply_suffix(sym)
+            info = await asyncio.to_thread(mt5.symbol_info, actual)
             if info is None:
                 missing.append(sym)
                 continue
-            # Add to Market Watch if not already visible
             if not info.visible:
-                await asyncio.to_thread(mt5.symbol_select, sym, True)
-                logger.debug(f"Added {sym} to Market Watch")
+                await asyncio.to_thread(mt5.symbol_select, actual, True)
+                logger.debug(f"Added {actual} to Market Watch")
 
         if missing:
-            logger.warning(f"Symbols not found on server (will be skipped): {missing}")
+            logger.warning(
+                f"Symbols not found on server (will be skipped): {missing}. "
+                f"Current suffix='{self._symbol_suffix}'"
+            )
 
-        # Trigger history preload for all available symbols.
-        # MT5 fetches candle data from the broker asynchronously — calling
-        # copy_rates_from_pos once primes the cache; subsequent calls succeed.
-        logger.info("Preloading historical data from broker (this may take 5–15 s)...")
-        preload_tasks = [
-            self._preload_symbol(sym)
-            for sym in config.SYMBOLS_WATCHLIST
-            if sym not in missing
-        ]
+        available = [s for s in config.SYMBOLS_WATCHLIST if s not in missing]
+        if not available:
+            logger.error(
+                "No symbols available — check SYMBOLS_WATCHLIST in config.py "
+                "or set SYMBOL_SUFFIX in .env"
+            )
+            return
+
+        logger.info(
+            f"Preloading historical data for {len(available)} symbols "
+            f"(this may take 5–15 s)..."
+        )
+        preload_tasks = [self._preload_symbol(self._apply_suffix(sym)) for sym in available]
         await asyncio.gather(*preload_tasks)
         logger.info("Historical data preload complete.")
 
@@ -274,10 +327,12 @@ class MT5Client:
             logger.error(f"Unknown timeframe: {timeframe}")
             return None
 
+        actual = self._apply_suffix(symbol)
+
         for attempt in range(1, retries + 1):
             # --- Method 1: position-based (most common) ---
             rates = await asyncio.to_thread(
-                mt5.copy_rates_from_pos, symbol, tf, 0, count
+                mt5.copy_rates_from_pos, actual, tf, 0, count
             )
 
             # --- Method 2: date-range fallback ---
@@ -287,7 +342,7 @@ class MT5Client:
                 days_back = max(7, count // 24 + 7)
                 date_from = date_to - timedelta(days=days_back)
                 rates = await asyncio.to_thread(
-                    mt5.copy_rates_range, symbol, tf, date_from, date_to
+                    mt5.copy_rates_range, actual, tf, date_from, date_to
                 )
                 if rates is not None and len(rates) > 0:
                     # Trim to requested count
@@ -319,7 +374,7 @@ class MT5Client:
 
     async def get_tick(self, symbol: str) -> Optional[dict]:
         """Return latest bid/ask for a symbol."""
-        tick = await asyncio.to_thread(mt5.symbol_info_tick, symbol)
+        tick = await asyncio.to_thread(mt5.symbol_info_tick, self._apply_suffix(symbol))
         if tick is None:
             return None
         return {
@@ -331,7 +386,7 @@ class MT5Client:
 
     async def get_symbol_info(self, symbol: str) -> Optional[dict]:
         """Return symbol metadata needed for lot sizing and SL calculation."""
-        info = await asyncio.to_thread(mt5.symbol_info, symbol)
+        info = await asyncio.to_thread(mt5.symbol_info, self._apply_suffix(symbol))
         if info is None:
             return None
         return {
@@ -425,7 +480,7 @@ class MT5Client:
 
         request = {
             "action":       mt5.TRADE_ACTION_DEAL,
-            "symbol":       symbol,
+            "symbol":       self._apply_suffix(symbol),
             "volume":       lot,
             "type":         order_type,
             "price":        price,
@@ -474,7 +529,7 @@ class MT5Client:
 
         request = {
             "action":       mt5.TRADE_ACTION_PENDING,
-            "symbol":       symbol,
+            "symbol":       self._apply_suffix(symbol),
             "volume":       lot,
             "type":         order_type,
             "price":        price,

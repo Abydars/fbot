@@ -18,6 +18,11 @@ EXNESS_SERVER = os.getenv("EXNESS_SERVER", "Exness-MT5Trial")
 # "demo" or "live" — used as an informational label in the UI
 TRADING_MODE = os.getenv("TRADING_MODE", "demo")
 
+# Symbol suffix used by this broker (auto-detected on connect).
+# Override in .env only if auto-detection fails, e.g. SYMBOL_SUFFIX=m
+# Leave empty for auto-detection.
+SYMBOL_SUFFIX = os.getenv("SYMBOL_SUFFIX", "")
+
 # ---------------------------------------------------------------------------
 # Symbols to scan (Exness forex + metals + crypto CFDs)
 # ---------------------------------------------------------------------------
