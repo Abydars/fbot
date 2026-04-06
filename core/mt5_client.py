@@ -167,13 +167,21 @@ class MT5Client:
         await asyncio.gather(*preload_tasks)
         logger.info("Historical data preload complete.")
 
-    async def _preload_symbol(self, symbol: str, retries: int = 6, delay: float = 3.0):
+    async def _preload_symbol(self, symbol: str, retries: int = 8, delay: float = 4.0):
         """Request a small candle slice to trigger MT5 broker data download."""
         tf = TIMEFRAMES.get("H1")
         for attempt in range(1, retries + 1):
+            # Try position-based first
             rates = await asyncio.to_thread(
                 mt5.copy_rates_from_pos, symbol, tf, 0, 10
             )
+            # Fall back to date range (more reliable when market closed / fresh terminal)
+            if rates is None or len(rates) == 0:
+                date_to   = datetime.now(timezone.utc)
+                date_from = date_to - timedelta(days=7)
+                rates = await asyncio.to_thread(
+                    mt5.copy_rates_range, symbol, tf, date_from, date_to
+                )
             if rates is not None and len(rates) > 0:
                 logger.debug(f"Preload OK: {symbol}")
                 return
@@ -223,12 +231,17 @@ class MT5Client:
         symbol: str,
         timeframe: str,
         count: int = 200,
-        retries: int = 3,
-        retry_delay: float = 2.0,
+        retries: int = 4,
+        retry_delay: float = 3.0,
     ) -> Optional[pd.DataFrame]:
         """
         Fetch OHLCV candles and return as a pandas DataFrame.
-        Retries automatically when MT5 is still downloading history from broker.
+
+        Strategy:
+        1. Try copy_rates_from_pos (position-based, fastest)
+        2. If that fails, fall back to copy_rates_from with an explicit date
+           range — more reliable on weekends and fresh terminals where MT5
+           hasn't cached recent bars yet.
         """
         tf = TIMEFRAMES.get(timeframe)
         if tf is None:
@@ -236,9 +249,24 @@ class MT5Client:
             return None
 
         for attempt in range(1, retries + 1):
+            # --- Method 1: position-based (most common) ---
             rates = await asyncio.to_thread(
                 mt5.copy_rates_from_pos, symbol, tf, 0, count
             )
+
+            # --- Method 2: date-range fallback ---
+            if rates is None or len(rates) == 0:
+                date_to   = datetime.now(timezone.utc)
+                # Request enough history to cover count bars with margin
+                days_back = max(7, count // 24 + 7)
+                date_from = date_to - timedelta(days=days_back)
+                rates = await asyncio.to_thread(
+                    mt5.copy_rates_range, symbol, tf, date_from, date_to
+                )
+                if rates is not None and len(rates) > 0:
+                    # Trim to requested count
+                    rates = rates[-count:]
+
             if rates is not None and len(rates) > 0:
                 df = pd.DataFrame(rates)
                 df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
@@ -249,13 +277,15 @@ class MT5Client:
             err = await asyncio.to_thread(mt5.last_error)
             if attempt < retries:
                 logger.debug(
-                    f"OHLCV retry {attempt}/{retries} {symbol} {timeframe} — MT5 error: {err}"
+                    f"OHLCV retry {attempt}/{retries} {symbol} {timeframe} "
+                    f"— MT5 error: {err}"
                 )
                 await asyncio.sleep(retry_delay)
             else:
                 logger.warning(
                     f"No OHLCV data for {symbol} {timeframe} after {retries} attempts "
-                    f"(MT5 error: {err}). Is the symbol in Market Watch?"
+                    f"(MT5 error: {err}). "
+                    f"If market is closed open a chart for {symbol} in MT5 terminal."
                 )
         return None
 
